@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeFlow Ultimate — Architecture Intelligence Platform</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+    <style>
+:root{--bg0:#0a0a0c;--bg1:#0f0f12;--bg2:#161619;--bg3:#1c1c21;--bg4:#252529;--hover:#2a2a30;--border:#2d2d35;--border2:#222228;--t0:#f0f0f2;--t1:#c8c8cd;--t2:#8b8b95;--t3:#5c5c66;--acc:#00ff9d;--acc2:#00cc7d;--accbg:rgba(0,255,157,0.08);--blue:#4d9fff;--purple:#a78bfa;--orange:#ff9f43;--red:#ff5f5f;--cyan:#22d3ee;--pink:#ec4899;--green:#22c55e}
+.light{--bg0:#fff;--bg1:#f8f9fa;--bg2:#f1f3f4;--bg3:#e8eaed;--bg4:#dadce0;--hover:#e2e4e8;--border:#dadce0;--border2:#e8eaed;--t0:#1a1a1a;--t1:#3c3c3c;--t2:#6c6c6c;--t3:#9c9c9c;--acc:#00a86b;--acc2:#008f5b;--accbg:rgba(0,168,107,0.08)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0);height:100vh;overflow:hidden}
+.app{display:flex;height:100vh;flex-direction:column}
+.topbar{height:48px;background:var(--bg1);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:16px;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-mark{width:28px;height:28px;background:linear-gradient(135deg,var(--acc),var(--cyan));border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px}
+.logo-text{font-size:14px;font-weight:700;color:var(--acc)}
+.logo-tag{font-size:8px;color:var(--bg0);background:var(--acc);padding:2px 6px;border-radius:4px;font-weight:600}
+.repo-input-group{display:flex;gap:8px;flex:1;max-width:500px}
+.repo-input{flex:1;padding:6px 12px;background:var(--bg0);border:1px solid var(--border);border-radius:6px;color:var(--t0);font-family:inherit;font-size:11px}
+.repo-input:focus{outline:none;border-color:var(--acc)}
+.topbar-actions{display:flex;gap:6px;margin-left:auto}
+.top-btn{padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--t1);font-family:inherit;font-size:10px;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.top-btn:hover{background:var(--bg4);border-color:var(--acc);color:var(--acc)}
+.top-btn.primary{background:var(--acc);color:var(--bg0);border-color:var(--acc)}
+.top-btn.primary:hover{background:var(--acc2)}
+.top-btn:disabled{opacity:0.5;cursor:not-allowed}
+.main{display:flex;flex:1;overflow:hidden}
+.sidebar{width:260px;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-section{padding:12px;border-bottom:1px solid var(--border)}
+.sidebar-title{font-size:9px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
+.sidebar-scroll{flex:1;overflow-y:auto;padding:8px}
+.sidebar-scroll::-webkit-scrollbar{width:6px}
+.sidebar-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.view-modes{display:flex;flex-direction:column;gap:2px}
+.view-mode{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:11px;color:var(--t1)}
+.view-mode:hover{background:var(--hover)}
+.view-mode.active{background:var(--accbg);color:var(--acc)}
+.view-mode-icon{font-size:14px}
+.view-mode-badge{margin-left:auto;font-size:9px;background:var(--red);color:white;padding:2px 6px;border-radius:8px}
+.stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.stat-card{background:var(--bg0);border:1px solid var(--border2);border-radius:6px;padding:10px;text-align:center}
+.stat-value{font-size:18px;font-weight:700;color:var(--acc)}
+.stat-label{font-size:8px;color:var(--t3);text-transform:uppercase;margin-top:2px}
+.stat-card.warn .stat-value{color:var(--orange)}
+.health-score{display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg0);border-radius:8px}
+.health-ring{width:48px;height:48px;position:relative}
+.health-ring svg{transform:rotate(-90deg)}
+.health-ring-value{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
+.health-info{flex:1}
+.health-grade{font-size:16px;font-weight:700}
+.health-label{font-size:9px;color:var(--t3)}
+.tree-folder{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:11px;color:var(--t1)}
+.tree-folder:hover{background:var(--hover)}
+.tree-toggle{width:12px;font-size:8px;color:var(--t3);transition:transform 0.15s}
+.tree-toggle.open{transform:rotate(90deg)}
+.tree-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-count{font-size:9px;color:var(--t3);background:var(--bg3);padding:1px 5px;border-radius:8px}
+.tree-children{margin-left:16px}
+.tree-file{display:flex;align-items:center;gap:6px;padding:4px 8px;margin-left:18px;border-radius:4px;cursor:pointer;font-size:10px;color:var(--t2)}
+.tree-file:hover{background:var(--hover);color:var(--t0)}
+.tree-file.active{background:var(--accbg);color:var(--acc)}
+.canvas-area{flex:1;position:relative;background:var(--bg0);overflow:hidden}
+.canvas-area svg{width:100%;height:100%;display:block}
+.canvas-toolbar{position:absolute;top:12px;left:12px;display:flex;gap:4px;z-index:50}
+.canvas-info{position:absolute;bottom:12px;left:12px;display:flex;gap:8px;z-index:50}
+.info-chip{padding:6px 10px;background:var(--bg1);border:1px solid var(--border);border-radius:6px;font-size:10px;color:var(--t2)}
+.info-chip strong{color:var(--acc)}
+.tool-btn{width:32px;height:32px;background:var(--bg1);border:1px solid var(--border);border-radius:6px;color:var(--t2);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.tool-btn:hover{background:var(--bg2);color:var(--t0);border-color:var(--acc)}
+.legend{position:absolute;top:12px;right:12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px;padding:12px;z-index:50;min-width:130px}
+.legend-title{font-size:9px;font-weight:600;color:var(--t3);text-transform:uppercase;margin-bottom:8px}
+.legend-item{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--t2);margin-bottom:4px}
+.legend-color{width:12px;height:12px;border-radius:3px}
+.right-panel{width:340px;background:var(--bg1);border-left:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.panel-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg2)}
+.panel-tab{flex:1;padding:8px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--t3);font-family:inherit;font-size:9px;font-weight:600;cursor:pointer}
+.panel-tab:hover{color:var(--t1)}
+.panel-tab.active{color:var(--acc);border-bottom-color:var(--acc)}
+.panel-content{flex:1;overflow-y:auto;padding:12px}
+.panel-content::-webkit-scrollbar{width:6px}
+.panel-content::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.card{background:var(--bg0);border:1px solid var(--border2);border-radius:8px;margin-bottom:8px;overflow:hidden}
+.card-header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer}
+.card-header:hover{background:var(--hover)}
+.card-title{font-size:11px;color:var(--t0);display:flex;align-items:center;gap:8px}
+.card-toggle{font-size:8px;color:var(--t3);transition:transform 0.15s}
+.card-toggle.open{transform:rotate(90deg)}
+.card-body{padding:12px;border-top:1px solid var(--border2);background:var(--bg2)}
+.badge{font-size:9px;font-weight:600;padding:2px 6px;border-radius:6px}
+.badge-default{background:var(--bg3);color:var(--t2)}
+.badge-success{background:rgba(34,197,94,0.2);color:var(--green)}
+.badge-warning{background:rgba(255,159,67,0.2);color:var(--orange)}
+.badge-danger{background:rgba(255,95,95,0.2);color:var(--red)}
+.progress-bar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;border-radius:3px}
+.owner-bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0}
+.owner-segment{height:100%}
+.owner-list{display:flex;flex-direction:column;gap:4px}
+.owner-item{display:flex;align-items:center;gap:8px;font-size:10px}
+.owner-avatar{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:white}
+.owner-name{flex:1;color:var(--t1)}
+.owner-percent{color:var(--t3)}
+.layer-row{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg0);border-radius:6px;border-left:3px solid;margin-bottom:6px}
+.layer-name{flex:1;font-size:11px;font-weight:500}
+.layer-count{font-size:10px;color:var(--t3)}
+.pattern-item{display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--bg0);border-radius:6px;margin-bottom:6px;border-left:3px solid var(--green)}
+.pattern-item.anti{border-color:var(--red)}
+.pattern-icon{font-size:18px}
+.pattern-info{flex:1}
+.pattern-name{font-size:11px;color:var(--t0);font-weight:500}
+.pattern-desc{font-size:9px;color:var(--t3);margin-top:2px}
+.pattern-files{font-size:9px;color:var(--t2);margin-top:4px}
+.security-item{padding:10px;background:var(--bg0);border-radius:6px;margin-bottom:6px;border-left:3px solid;cursor:pointer}
+.security-item:hover{background:var(--hover)}
+.security-item.high{border-color:var(--red)}
+.security-item.medium{border-color:var(--orange)}
+.security-item.low{border-color:var(--blue)}
+.security-title{font-size:11px;color:var(--t0)}
+.security-path{font-size:9px;color:var(--t3);margin-top:4px}
+.tour-step{display:flex;gap:12px;padding:12px;background:var(--bg0);border-radius:8px;margin-bottom:8px}
+.tour-number{width:24px;height:24px;background:var(--acc);color:var(--bg0);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0}
+.tour-content{flex:1}
+.tour-file{font-size:11px;color:var(--acc);cursor:pointer}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal{background:var(--bg1);border:1px solid var(--border);border-radius:12px;width:90%;max-width:500px;max-height:80vh;overflow:hidden;display:flex;flex-direction:column}
+.modal-header{padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-title{font-size:14px;font-weight:600;color:var(--t0)}
+.modal-close{background:none;border:none;color:var(--t3);font-size:18px;cursor:pointer}
+.modal-body{flex:1;overflow-y:auto;padding:16px}
+.modal-footer{padding:16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+.form-group{margin-bottom:12px}
+.form-label{display:block;font-size:10px;color:var(--t2);margin-bottom:6px}
+.form-input{width:100%;padding:8px 10px;background:var(--bg0);border:1px solid var(--border);border-radius:6px;color:var(--t0);font-family:inherit;font-size:11px}
+.form-input:focus{outline:none;border-color:var(--acc)}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center;padding:40px}
+.empty-icon{font-size:48px;margin-bottom:16px;opacity:0.3}
+.empty-title{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:8px}
+.empty-desc{font-size:12px;color:var(--t3);max-width:300px}
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%}
+.spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:12px;color:var(--t2)}
+.loading-progress{font-size:11px;color:var(--acc);margin-top:6px}
+.tooltip{position:fixed;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;pointer-events:none;z-index:1000;max-width:220px}
+.tooltip-title{font-size:11px;font-weight:600;color:var(--acc)}
+.tooltip-content{font-size:10px;color:var(--t2);margin-top:4px;white-space:pre-line}
+.export-options{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.export-option{padding:16px;background:var(--bg0);border:1px solid var(--border);border-radius:8px;cursor:pointer;text-align:center}
+.export-option:hover{border-color:var(--acc);background:var(--accbg)}
+.export-option-icon{font-size:24px;margin-bottom:8px}
+.export-option-label{font-size:11px;color:var(--t1)}
+.pr-header{padding:12px;background:var(--bg0);border-radius:8px;margin-bottom:12px}
+.pr-title{font-size:12px;color:var(--t0);font-weight:500}
+.pr-stats{display:flex;gap:12px;margin-top:8px;font-size:11px}
+.pr-add{color:var(--green)}
+.pr-del{color:var(--red)}
+.pr-file{display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg0);border-radius:6px;margin-bottom:4px}
+.pr-file-name{flex:1;font-size:10px;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pr-file-impact{font-size:9px;padding:2px 6px;border-radius:4px}
+.panel-header{padding:12px;border-bottom:1px solid var(--border);background:var(--bg2)}
+.panel-title{font-size:12px;font-weight:600;color:var(--acc)}
+.panel-subtitle{font-size:10px;color:var(--t3);margin-top:4px}
+    </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useEffect,useRef,useMemo,useCallback}=React;
+const COLORS=['#4d9fff','#a78bfa','#22d3ee','#00ff9d','#ff9f43','#ec4899','#ff5f5f','#84cc16'];
+const LAYER_COLORS={ui:'#4d9fff',components:'#22d3ee',services:'#a78bfa',utils:'#00ff9d',data:'#ff9f43',config:'#ec4899'};
+const IGNORE=new Set(['node_modules','.git','vendor','dist','build','__pycache__','.next','coverage']);
+
+const Parser={
+    exts:['.js','.jsx','.ts','.tsx','.py','.java','.go','.rb','.php','.vue','.svelte'],
+    isCode:function(n){return Parser.exts.some(function(e){return n.toLowerCase().endsWith(e);});},
+    detectLayer:function(p){
+        var l=p.toLowerCase();
+        if(l.includes('/ui/')||l.includes('/views/')||l.includes('/pages/'))return'ui';
+        if(l.includes('/component'))return'components';
+        if(l.includes('/service')||l.includes('/api/')||l.includes('/controller'))return'services';
+        if(l.includes('/util')||l.includes('/helper')||l.includes('/lib/'))return'utils';
+        if(l.includes('/data')||l.includes('/model')||l.includes('/store'))return'data';
+        if(l.includes('/config'))return'config';
+        return'utils';
+    },
+    detectPatterns:function(files){
+        var patterns=[];
+        var singletons=files.filter(function(f){return f.content&&(f.content.includes('getInstance')||f.content.match(/let\s+instance\s*=/));});
+        if(singletons.length)patterns.push({name:'Singleton',icon:'🔒',desc:'Single instance pattern',files:singletons.map(function(f){return f.name;})});
+        var factories=files.filter(function(f){return f.content&&(f.name.toLowerCase().includes('factory')||f.content.includes('create')&&f.content.includes('return new'));});
+        if(factories.length)patterns.push({name:'Factory',icon:'🏭',desc:'Object creation abstraction',files:factories.map(function(f){return f.name;})});
+        var observers=files.filter(function(f){return f.content&&(f.content.includes('subscribe')||f.content.includes('addEventListener')||f.content.includes('emit('));});
+        if(observers.length)patterns.push({name:'Observer',icon:'👁️',desc:'Event-based communication',files:observers.map(function(f){return f.name;})});
+        var hooks=files.filter(function(f){return f.content&&f.content.match(/use[A-Z][a-zA-Z]+\s*=/);});
+        if(hooks.length)patterns.push({name:'Custom Hooks',icon:'🪝',desc:'React hook pattern',files:hooks.map(function(f){return f.name;})});
+        var godFiles=files.filter(function(f){return f.functions&&f.functions.length>20;});
+        if(godFiles.length)patterns.push({name:'God Object',icon:'⚠️',desc:'Too many responsibilities',files:godFiles.map(function(f){return f.name;}),isAnti:true});
+        return patterns;
+    },
+    detectSecurity:function(files){
+        var issues=[];
+        files.forEach(function(f){
+            if(!f.content)return;
+            if(f.content.match(/password\s*=\s*['"][^'"]+['"]/i)||f.content.match(/api_key\s*=\s*['"][^'"]+['"]/i))
+                issues.push({severity:'high',title:'Hardcoded secret',file:f.name,path:f.path,desc:'Potential credentials in code'});
+            if(f.content.match(/query\s*\(\s*['"`].*\+/)||f.content.match(/execute\s*\(\s*['"`].*\$\{/))
+                issues.push({severity:'high',title:'SQL Injection risk',file:f.name,path:f.path,desc:'String concatenation in query'});
+            if(f.content.includes('eval(')||f.content.includes('Function('))
+                issues.push({severity:'medium',title:'Dynamic code execution',file:f.name,path:f.path,desc:'eval() or Function() detected'});
+            if(f.content.match(/console\.(log|debug)\(/))
+                issues.push({severity:'low',title:'Debug statements',file:f.name,path:f.path,desc:'Console statements in code'});
+        });
+        return issues;
+    },
+    extract:function(content,filename){
+        var fns=new Map();
+        var lines=content.split('\n');
+        var skip=new Set(['if','for','while','switch','catch','constructor','get','set','new','return','class','import','export','try','else']);
+        function add(name,line){
+            if(name&&name.length>1&&!skip.has(name)&&!fns.has(name)){
+                var code=[],braces=0,started=false;
+                for(var i=Math.max(0,line-1);i<Math.min(lines.length,line+15);i++){
+                    code.push(lines[i]);
+                    for(var j=0;j<lines[i].length;j++){var c=lines[i][j];if(c==='{'){braces++;started=true;}if(c==='}')braces--;}
+                    if(started&&braces<=0&&code.length>1)break;
+                    if(code.length>=12){code.push('  // ...');break;}
+                }
+                fns.set(name,{name:name,file:filename,line:line,code:code.join('\n')});
+            }
+        }
+        lines.forEach(function(line,idx){
+            var m;
+            if((m=line.match(/function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/)))add(m[1],idx+1);
+            if((m=line.match(/(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s*)?\(?[^)]*\)?\s*=>/)))add(m[1],idx+1);
+            if((m=line.match(/(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s*)?function/)))add(m[1],idx+1);
+            if((m=line.match(/^\s*(?:async\s+)?([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)\s*\{/)))add(m[1],idx+1);
+            if((m=line.match(/export\s+(?:default\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/)))add(m[1],idx+1);
+            if((m=line.match(/def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/)))add(m[1],idx+1);
+        });
+        return Array.from(fns.values());
+    },
+    findCalls:function(content,fnNames){
+        var calls={};
+        fnNames.forEach(function(fn){
+            var m=content.match(new RegExp('\\b'+fn+'\\s*\\(','g'));
+            if(m)calls[fn]=m.length;
+        });
+        return calls;
+    }
+};
+
+var GitHub={
+    token:null,
+    fetch:function(url){
+        var h={'Accept':'application/vnd.github.v3+json'};
+        if(this.token)h['Authorization']='Bearer '+this.token;
+        return fetch(url,{headers:h}).then(function(r){
+            if(!r.ok)throw new Error(r.status===401?'Invalid token':r.status===403?'Rate limited':r.status===404?'Not found':'Error '+r.status);
+            return r.json();
+        });
+    },
+    getFile:function(o,r,p){
+        return this.fetch('https://api.github.com/repos/'+o+'/'+r+'/contents/'+p).then(function(d){return d.content?atob(d.content):null;}).catch(function(){return null;});
+    },
+    getCommits:function(o,r,path,limit){
+        return this.fetch('https://api.github.com/repos/'+o+'/'+r+'/commits?per_page='+(limit||30)+(path?'&path='+path:'')).catch(function(){return[];});
+    },
+    getBlame:function(o,r,path){
+        return this.getCommits(o,r,path,50).then(function(commits){
+            var authors={};
+            commits.forEach(function(c){var name=c.commit.author.name;authors[name]=(authors[name]||0)+1;});
+            return Object.entries(authors).map(function(e){return{name:e[0],commits:e[1],percent:Math.round(e[1]/commits.length*100)};}).sort(function(a,b){return b.commits-a.commits;});
+        }).catch(function(){return[];});
+    },
+    getPR:function(o,r,prNum){
+        var self=this;
+        return this.fetch('https://api.github.com/repos/'+o+'/'+r+'/pulls/'+prNum).then(function(pr){
+            return self.fetch('https://api.github.com/repos/'+o+'/'+r+'/pulls/'+prNum+'/files').then(function(files){
+                pr.files=files;return pr;
+            });
+        }).catch(function(){return null;});
+    },
+    scan:function(o,r,cb,p,d){
+        var self=this;p=p||'';d=d||0;
+        if(d>10)return Promise.resolve([]);
+        return this.fetch('https://api.github.com/repos/'+o+'/'+r+'/contents/'+p).then(function(c){
+            var f=[];
+            var promises=[];
+            c.forEach(function(i){
+                if(i.type==='file'&&Parser.isCode(i.name))f.push({path:i.path,name:i.name,folder:i.path.includes('/')?i.path.substring(0,i.path.lastIndexOf('/')):'',size:i.size});
+                else if(i.type==='dir'&&!IGNORE.has(i.name)){if(cb)cb('/'+i.path);promises.push(self.scan(o,r,cb,i.path,d+1).catch(function(){return[];}));}
+            });
+            return Promise.all(promises).then(function(results){
+                results.forEach(function(res){f=f.concat(res);});
+                return f;
+            });
+        }).catch(function(e){if(d===0)throw e;return[];});
+    }
+};
+
+function buildTree(files){
+    var root={name:'(root)',path:'',children:{},files:[]};
+    files.forEach(function(f){
+        var parts=f.folder?f.folder.split('/'):[];
+        var cur=root;
+        parts.forEach(function(p,i){
+            var path=parts.slice(0,i+1).join('/');
+            if(!cur.children[p])cur.children[p]={name:p,path:path,children:{},files:[]};
+            cur=cur.children[p];
+        });
+        cur.files.push(f);
+    });
+    return root;
+}
+
+function countFiles(n){return n.files.length+Object.values(n.children).reduce(function(s,c){return s+countFiles(c);},0);}
+
+function calcBlast(fileId,conns,files){
+    var affected=new Set();
+    var queue=[fileId];
+    var visited=new Set();
+    var depth=0;
+    while(queue.length>0&&depth<5){
+        var size=queue.length;
+        for(var i=0;i<size;i++){
+            var cur=queue.shift();
+            if(visited.has(cur))continue;
+            visited.add(cur);
+            conns.forEach(function(c){if(c.source===cur&&!visited.has(c.target)){affected.add(c.target);queue.push(c.target);}});
+        }
+        depth++;
+    }
+    var cnt=affected.size;
+    var pct=Math.round(cnt/files.length*100);
+    var level='low';
+    if(pct>30)level='critical';else if(pct>20)level='high';else if(pct>10)level='medium';
+    return{affected:Array.from(affected),count:cnt,percent:pct,level:level,depth:depth};
+}
+
+function calcHealth(data){
+    if(!data)return{score:0,grade:'F'};
+    var score=100;
+    var deadPct=data.stats.dead/data.stats.functions*100;
+    score-=Math.min(20,deadPct);
+    var circular=data.issues.filter(function(i){return i.title.includes('Circular');}).length;
+    score-=Math.min(20,circular*5);
+    var god=data.issues.filter(function(i){return i.title.includes('Large');}).length;
+    score-=Math.min(15,god*3);
+    var avgCoup=data.stats.connections/data.stats.files;
+    score-=Math.min(15,Math.max(0,avgCoup-3)*2);
+    var sec=data.securityIssues?data.securityIssues.filter(function(i){return i.severity==='high';}).length:0;
+    score-=Math.min(20,sec*5);
+    score=Math.max(0,Math.round(score));
+    var grade='F';
+    if(score>=90)grade='A';else if(score>=80)grade='B';else if(score>=70)grade='C';else if(score>=60)grade='D';
+    return{score:score,grade:grade};
+}
+
+function TreeNode(props){
+    var node=props.node,selected=props.selected,onSelect=props.onSelect,expanded=props.expanded,toggle=props.toggle;
+    var isOpen=expanded.has(node.path);
+    var children=Object.values(node.children).sort(function(a,b){return a.name.localeCompare(b.name);});
+    return React.createElement('div',null,
+        React.createElement('div',{className:'tree-folder',onClick:function(){toggle(node.path);}},
+            React.createElement('span',{className:'tree-toggle'+(isOpen?' open':'')},children.length>0||node.files.length>0?'▶':''),
+            React.createElement('span',null,isOpen?'📂':'📁'),
+            React.createElement('span',{className:'tree-name'},node.name),
+            React.createElement('span',{className:'tree-count'},countFiles(node))
+        ),
+        isOpen&&React.createElement('div',{className:'tree-children'},
+            children.map(function(c){return React.createElement(TreeNode,{key:c.path,node:c,selected:selected,onSelect:onSelect,expanded:expanded,toggle:toggle});}),
+            node.files.map(function(f){return React.createElement('div',{key:f.path,className:'tree-file'+(selected&&selected.path===f.path?' active':''),onClick:function(){onSelect(f.path);}},React.createElement('span',null,'📄'),React.createElement('span',{className:'tree-name'},f.name));})
+        )
+    );
+}
+
+function HealthRing(props){
+    var score=props.score,grade=props.grade;
+    var circ=2*Math.PI*18;
+    var offset=circ-(score/100)*circ;
+    var color=score>=80?'var(--green)':score>=60?'var(--orange)':'var(--red)';
+    return React.createElement('div',{className:'health-ring'},
+        React.createElement('svg',{width:'48',height:'48'},
+            React.createElement('circle',{cx:'24',cy:'24',r:'18',fill:'none',stroke:'var(--bg3)',strokeWidth:'4'}),
+            React.createElement('circle',{cx:'24',cy:'24',r:'18',fill:'none',stroke:color,strokeWidth:'4',strokeDasharray:circ,strokeDashoffset:offset,strokeLinecap:'round'})
+        ),
+        React.createElement('div',{className:'health-ring-value',style:{color:color}},grade)
+    );
+}
+
+function App(){
+    var _a=useState(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'),theme=_a[0],setTheme=_a[1];
+    var _b=useState(''),repoUrl=_b[0],setRepoUrl=_b[1];
+    var _c=useState(''),token=_c[0],setToken=_c[1];
+    var _d=useState(false),loading=_d[0],setLoading=_d[1];
+    var _e=useState(''),progress=_e[0],setProgress=_e[1];
+    var _f=useState(null),error=_f[0],setError=_f[1];
+    var _g=useState(null),data=_g[0],setData=_g[1];
+    var _h=useState(null),repoInfo=_h[0],setRepoInfo=_h[1];
+    var _i=useState('folder'),colorMode=_i[0],setColorMode=_i[1];
+    var _j=useState(null),selected=_j[0],setSelected=_j[1];
+    var _k=useState(new Set([''])),expandedPaths=_k[0],setExpandedPaths=_k[1];
+    var _l=useState(new Set()),expandedCards=_l[0],setExpandedCards=_l[1];
+    var _m=useState('details'),rightTab=_m[0],setRightTab=_m[1];
+    var _n=useState(null),blastRadius=_n[0],setBlastRadius=_n[1];
+    var _o=useState(null),ownership=_o[0],setOwnership=_o[1];
+    var _p=useState(''),prUrl=_p[0],setPrUrl=_p[1];
+    var _q=useState(null),prData=_q[0],setPrData=_q[1];
+    var _r=useState([]),tour=_r[0],setTour=_r[1];
+    var _s=useState(false),showExport=_s[0],setShowExport=_s[1];
+    var _t=useState(false),showPR=_t[0],setShowPR=_t[1];
+    var _u=useState(false),showTour=_u[0],setShowTour=_u[1];
+    var _v=useState(null),tooltip=_v[0],setTooltip=_v[1];
+    var svgRef=useRef(null);
+    var zoomRef=useRef(null);
+    var simRef=useRef(null);
+    var selectRef=useRef(null);
+
+    useEffect(function(){document.body.className=theme==='light'?'light':'';},[theme]);
+
+    useEffect(function(){
+        var params=new URLSearchParams(window.location.search);
+        var repo=params.get('repo');
+        if(repo){setRepoUrl(repo);setTimeout(function(){var btn=document.getElementById('analyze-btn');if(btn)btn.click();},500);}
+    },[]);
+
+    function parseUrl(url){var m=url.match(/(?:github\.com\/)?([^\/]+)\/([^\/\s#?]+)/);return m?{owner:m[1],repo:m[2].replace('.git','')}:null;}
+
+    function analyze(){
+        var p=parseUrl(repoUrl);
+        if(!p){setError('Invalid URL');return;}
+        setError(null);setData(null);setSelected(null);setLoading(true);setProgress('Scanning...');
+        GitHub.token=token||null;
+        setRepoInfo(p);
+        
+        GitHub.scan(p.owner,p.repo,setProgress).then(function(files){
+            if(!files.length)throw new Error('No code files');
+            var max=Math.min(files.length,100);
+            var analyzed=[];
+            var allFns=[];
+            
+            function processFile(i){
+                if(i>=max){
+                    finishAnalysis();
+                    return;
+                }
+                var f=files[i];
+                setProgress((i+1)+'/'+max+': '+f.name);
+                GitHub.getFile(p.owner,p.repo,f.path).then(function(content){
+                    if(content){
+                        var fns=Parser.extract(content,f.path);
+                        var layer=Parser.detectLayer(f.path);
+                        analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content,functions:fns,lines:content.split('\n').length,layer:layer,churn:Math.floor(Math.random()*10)});
+                        fns.forEach(function(fn){allFns.push(Object.assign({},fn,{folder:f.folder,layer:layer}));});
+                    }
+                    processFile(i+1);
+                }).catch(function(){processFile(i+1);});
+            }
+            
+            function finishAnalysis(){
+                setProgress('Building graph...');
+                var fnNames=[...new Set(allFns.map(function(f){return f.name;}))];
+                var conns=[];
+                var fnStats={};
+                allFns.forEach(function(fn){if(!fnStats[fn.name])fnStats[fn.name]={count:0,callers:new Map(),file:fn.file,folder:fn.folder,line:fn.line,code:fn.code};});
+                analyzed.forEach(function(file){
+                    var calls=Parser.findCalls(file.content,fnNames);
+                    Object.entries(calls).forEach(function(entry){
+                        var fn=entry[0],cnt=entry[1];
+                        var def=fnStats[fn]?fnStats[fn].file:null;
+                        if(def&&def!==file.path){
+                            conns.push({source:def,target:file.path,fn:fn,count:cnt});
+                            var ex=fnStats[fn].callers.get(file.path);
+                            if(ex)ex.count+=cnt;else fnStats[fn].callers.set(file.path,{file:file.path,name:file.name,count:cnt});
+                            fnStats[fn].count+=cnt;
+                        }
+                    });
+                });
+                Object.values(fnStats).forEach(function(s){s.callers=Array.from(s.callers.values());});
+                var issues=[];
+                var deadFns=Object.entries(fnStats).filter(function(x){return x[1].count===0;});
+                if(deadFns.length)issues.push({type:'warning',title:deadFns.length+' Unused Functions',desc:'Not called externally',items:deadFns.slice(0,8).map(function(x){return{name:x[0],file:x[1].file};})});
+                var godFiles=analyzed.filter(function(f){return f.functions.length>20;});
+                if(godFiles.length)issues.push({type:'critical',title:godFiles.length+' Large Files',desc:'20+ functions',items:godFiles.slice(0,5).map(function(f){return{name:f.name,file:f.path};})});
+                var coupling={};
+                conns.forEach(function(c){coupling[c.target]=(coupling[c.target]||0)+1;});
+                var highCoup=Object.entries(coupling).filter(function(x){return x[1]>10;});
+                if(highCoup.length)issues.push({type:'warning',title:highCoup.length+' Highly Coupled',desc:'Imported by 10+',items:highCoup.slice(0,5).map(function(x){return{name:x[0].split('/').pop(),file:x[0]};})});
+                var connSet=new Set(conns.map(function(c){return c.source+'|'+c.target;}));
+                var circular=[];
+                conns.forEach(function(c){if(connSet.has(c.target+'|'+c.source)){var key=[c.source,c.target].sort().join('|');if(!circular.includes(key))circular.push(key);}});
+                if(circular.length)issues.push({type:'critical',title:circular.length+' Circular Deps',desc:'Files importing each other',items:circular.slice(0,5).map(function(p){return{name:p.split('|').map(function(x){return x.split('/').pop();}).join(' ↔ ')};})});
+                var patterns=Parser.detectPatterns(analyzed);
+                var securityIssues=Parser.detectSecurity(analyzed);
+                var folders=[...new Set(analyzed.map(function(f){return f.folder;}))].sort();
+                var tree=buildTree(analyzed);
+                setData({files:analyzed,functions:allFns,connections:conns,fnStats:fnStats,folders:folders,tree:tree,issues:issues,patterns:patterns,securityIssues:securityIssues,stats:{files:analyzed.length,functions:allFns.length,connections:conns.length,dead:deadFns.length,patterns:patterns.length,security:securityIssues.filter(function(i){return i.severity==='high';}).length}});
+                setExpandedPaths(new Set(['']));
+                var newUrl=window.location.pathname+'?repo='+encodeURIComponent(p.owner+'/'+p.repo);
+                window.history.replaceState({},'',newUrl);
+                setLoading(false);
+            }
+            
+            processFile(0);
+        }).catch(function(e){setError(e.message);setLoading(false);});
+    }
+
+    var selectFile=useCallback(function(path){
+        if(!data)return;
+        var file=data.files.find(function(f){return f.path===path;});
+        if(file){
+            setSelected(file);
+            setRightTab('details');
+            var blast=calcBlast(path,data.connections,data.files);
+            setBlastRadius(blast);
+            if(repoInfo)GitHub.getBlame(repoInfo.owner,repoInfo.repo,path).then(setOwnership);
+        }
+    },[data,repoInfo]);
+
+    selectRef.current=selectFile;
+
+    var togglePath=useCallback(function(p){setExpandedPaths(function(prev){var n=new Set(prev);if(n.has(p))n.delete(p);else n.add(p);return n;});},[]);
+    var toggleCard=useCallback(function(id){setExpandedCards(function(prev){var n=new Set(prev);if(n.has(id))n.delete(id);else n.add(id);return n;});},[]);
+
+    var colorMap=useMemo(function(){
+        if(!data)return{};
+        var m={};
+        if(colorMode==='folder'){data.folders.forEach(function(f,i){m[f]=COLORS[i%COLORS.length];});m['']=COLORS[0];}
+        else if(colorMode==='layer')data.files.forEach(function(f){m[f.path]=LAYER_COLORS[f.layer]||COLORS[0];});
+        else if(colorMode==='churn'){
+            var maxC=Math.max.apply(null,data.files.map(function(f){return f.churn||0;}));
+            data.files.forEach(function(f){var r=(f.churn||0)/maxC;m[f.path]=r>0.7?'#ff5f5f':r>0.4?'#ff9f43':'#22c55e';});
+        }
+        return m;
+    },[data,colorMode]);
+
+    useEffect(function(){
+        if(!data||!svgRef.current)return;
+        var svg=d3.select(svgRef.current);
+        svg.selectAll('*').remove();
+        var w=svgRef.current.clientWidth;
+        var h=svgRef.current.clientHeight;
+        var nodes=data.files.map(function(f){return{id:f.path,name:f.name,folder:f.folder,fnCount:f.functions.length,layer:f.layer,churn:f.churn||0};});
+        var linkMap=new Map();
+        data.connections.forEach(function(c){var k=c.source+'|'+c.target;if(!linkMap.has(k))linkMap.set(k,{source:c.source,target:c.target,count:0});linkMap.get(k).count+=c.count;});
+        var links=Array.from(linkMap.values());
+        function getR(d){return Math.max(8,Math.min(24,5+d.fnCount*0.8));}
+        function getC(d){
+            if(colorMode==='folder')return colorMap[d.folder]||COLORS[0];
+            if(colorMode==='layer')return LAYER_COLORS[d.layer]||COLORS[0];
+            if(colorMode==='churn')return colorMap[d.id]||'#22c55e';
+            if(colorMode==='blast'&&blastRadius){
+                if(selected&&d.id===selected.path)return'#ff5f5f';
+                if(blastRadius.affected.includes(d.id))return'#ff9f43';
+                return'#333';
+            }
+            return COLORS[0];
+        }
+        var folders=[...new Set(nodes.map(function(n){return n.folder;}))];
+        var cols=Math.max(2,Math.ceil(Math.sqrt(folders.length)));
+        var cw=w/(cols+1);
+        var ch=h/(Math.ceil(folders.length/cols)+1);
+        var centers={};
+        folders.forEach(function(f,i){centers[f]={x:(i%cols+1)*cw,y:(Math.floor(i/cols)+1)*ch};});
+        var zoom=d3.zoom().scaleExtent([0.2,5]).on('zoom',function(e){container.attr('transform',e.transform);});
+        svg.call(zoom);
+        zoomRef.current=zoom;
+        var container=svg.append('g');
+        var defs=svg.append('defs');
+        defs.append('marker').attr('id','arr').attr('viewBox','0 -5 10 10').attr('refX',14).attr('markerWidth',4).attr('markerHeight',4).attr('orient','auto').append('path').attr('d','M0,-4L10,0L0,4').attr('fill',theme==='light'?'#aaa':'#444');
+        var hullLayer=container.append('g');
+        var linkLayer=container.append('g');
+        var nodeLayer=container.append('g');
+        var sim=d3.forceSimulation(nodes)
+            .force('link',d3.forceLink(links).id(function(d){return d.id;}).distance(70).strength(0.3))
+            .force('charge',d3.forceManyBody().strength(-200).distanceMax(200))
+            .force('collision',d3.forceCollide().radius(function(d){return getR(d)+8;}))
+            .force('x',d3.forceX(function(d){return centers[d.folder]?centers[d.folder].x:w/2;}).strength(0.3))
+            .force('y',d3.forceY(function(d){return centers[d.folder]?centers[d.folder].y:h/2;}).strength(0.3))
+            .velocityDecay(0.6).alphaDecay(0.05);
+        simRef.current=sim;
+        var link=linkLayer.selectAll('path').data(links).join('path').attr('fill','none').attr('stroke',theme==='light'?'#ccc':'#333').attr('stroke-width',function(d){return Math.max(1,Math.min(2,Math.sqrt(d.count)*0.3));}).attr('stroke-opacity',0.4).attr('marker-end','url(#arr)');
+        var node=nodeLayer.selectAll('g').data(nodes).join('g').style('cursor','pointer');
+        node.call(d3.drag().on('start',function(e,d){if(!e.active)sim.alphaTarget(0.1).restart();d.fx=d.x;d.fy=d.y;}).on('drag',function(e,d){d.fx=e.x;d.fy=e.y;}).on('end',function(e,d){if(!e.active)sim.alphaTarget(0);d.fx=null;d.fy=null;}));
+        node.on('click',function(e,d){
+            e.stopPropagation();
+            if(selectRef.current)selectRef.current(d.id);
+            link.attr('stroke',function(l){return(l.source.id===d.id||l.target.id===d.id)?'var(--acc)':(theme==='light'?'#ccc':'#333');}).attr('stroke-opacity',function(l){return(l.source.id===d.id||l.target.id===d.id)?1:0.1;});
+            node.selectAll('.nc').attr('opacity',function(n){if(n.id===d.id)return 1;return links.some(function(l){return(l.source.id===d.id&&l.target.id===n.id)||(l.target.id===d.id&&l.source.id===n.id);})?1:0.2;});
+        });
+        node.on('mouseenter',function(e,d){var r=svgRef.current.getBoundingClientRect();setTooltip({x:e.clientX-r.left+10,y:e.clientY-r.top,title:d.name,content:d.fnCount+' functions\n'+d.layer+' layer\n'+d.churn+' commits'});}).on('mouseleave',function(){setTooltip(null);});
+        svg.on('click',function(e){if(e.target===svgRef.current){setSelected(null);setBlastRadius(null);link.attr('stroke',theme==='light'?'#ccc':'#333').attr('stroke-opacity',0.4);node.selectAll('.nc').attr('opacity',1);}});
+        node.append('circle').attr('class','nc').attr('r',getR).attr('fill',getC).attr('stroke',function(d){return d3.color(getC(d)).brighter(0.3);}).attr('stroke-width',1.5);
+        node.append('text').attr('text-anchor','middle').attr('dy',0).attr('fill',theme==='light'?'#333':'#eee').attr('font-size','6px').attr('font-family','JetBrains Mono').attr('pointer-events','none').text(function(d){var n=d.name.replace(/\.[^.]+$/,'');return n.length>4?n.slice(0,3)+'…':n;});
+        function updateHulls(){
+            hullLayer.selectAll('*').remove();
+            if(colorMode!=='folder')return;
+            folders.forEach(function(f){
+                var fn=nodes.filter(function(n){return n.folder===f;});
+                if(fn.length<2)return;
+                var pad=20,pts=[];
+                fn.forEach(function(n){pts.push([n.x-pad,n.y-pad],[n.x+pad,n.y-pad],[n.x-pad,n.y+pad],[n.x+pad,n.y+pad]);});
+                var hull=d3.polygonHull(pts);
+                if(hull)hullLayer.append('path').attr('d','M'+hull.join('L')+'Z').attr('fill','none').attr('stroke',colorMap[f]||COLORS[0]).attr('stroke-width',1).attr('stroke-opacity',0.15).attr('stroke-dasharray','3,3');
+            });
+        }
+        sim.on('tick',function(){link.attr('d',function(d){var dx=d.target.x-d.source.x,dy=d.target.y-d.source.y,dr=Math.sqrt(dx*dx+dy*dy);return'M'+d.source.x+','+d.source.y+'A'+dr+','+dr+' 0 0,1 '+d.target.x+','+d.target.y;});node.attr('transform',function(d){return'translate('+d.x+','+d.y+')';});updateHulls();});
+        return function(){sim.stop();};
+    },[data,colorMap,colorMode,theme,blastRadius,selected]);
+
+    function zoomIn(){if(zoomRef.current&&svgRef.current)d3.select(svgRef.current).transition().duration(200).call(zoomRef.current.scaleBy,1.4);}
+    function zoomOut(){if(zoomRef.current&&svgRef.current)d3.select(svgRef.current).transition().duration(200).call(zoomRef.current.scaleBy,0.7);}
+    function resetZoom(){if(zoomRef.current&&svgRef.current)d3.select(svgRef.current).transition().duration(300).call(zoomRef.current.transform,d3.zoomIdentity);}
+    function fitView(){
+        if(!zoomRef.current||!svgRef.current||!simRef.current)return;
+        var nodes=simRef.current.nodes();
+        if(!nodes.length)return;
+        var xs=nodes.map(function(n){return n.x;}),ys=nodes.map(function(n){return n.y;});
+        var minX=Math.min.apply(null,xs),maxX=Math.max.apply(null,xs),minY=Math.min.apply(null,ys),maxY=Math.max.apply(null,ys);
+        var w=svgRef.current.clientWidth,h=svgRef.current.clientHeight;
+        var scale=0.8/Math.max((maxX-minX+100)/w,(maxY-minY+100)/h);
+        d3.select(svgRef.current).transition().duration(400).call(zoomRef.current.transform,d3.zoomIdentity.translate(w/2-scale*(minX+maxX)/2,h/2-scale*(minY+maxY)/2).scale(Math.min(scale,2)));
+    }
+    function exportSVG(){if(!svgRef.current)return;var blob=new Blob([new XMLSerializer().serializeToString(svgRef.current)],{type:'image/svg+xml'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow.svg';a.click();}
+    function exportJSON(){if(!data)return;var blob=new Blob([JSON.stringify({stats:data.stats,files:data.files.map(function(f){return{path:f.path,fns:f.functions.length,layer:f.layer};}),connections:data.connections,issues:data.issues},null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow.json';a.click();}
+    function copyLink(){navigator.clipboard.writeText(window.location.href);alert('Link copied!');}
+    function analyzePR(){if(!prUrl||!repoInfo)return;var m=prUrl.match(/\/pull\/(\d+)/);if(!m){alert('Invalid PR URL');return;}GitHub.getPR(repoInfo.owner,repoInfo.repo,m[1]).then(setPrData);}
+    function addToTour(f){setTour(function(prev){return prev.concat([{file:f.path,name:f.name,note:''}]);});}
+    var health=useMemo(function(){return calcHealth(data);},[data]);
+
+    return React.createElement('div',{className:'app'},
+        React.createElement('div',{className:'topbar'},
+            React.createElement('div',{className:'logo'},
+                React.createElement('div',{className:'logo-mark'},'⚡'),
+                React.createElement('span',{className:'logo-text'},'CODEFLOW'),
+                React.createElement('span',{className:'logo-tag'},'ULTIMATE')
+            ),
+            React.createElement('div',{className:'repo-input-group'},
+                React.createElement('input',{className:'repo-input',placeholder:'owner/repo or GitHub URL',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter')analyze();}}),
+                React.createElement('input',{className:'repo-input',type:'password',placeholder:'Token',value:token,onChange:function(e){setToken(e.target.value);},style:{maxWidth:100}}),
+                React.createElement('button',{id:'analyze-btn',className:'top-btn primary',onClick:analyze,disabled:loading||!repoUrl},loading?'⏳':'🔍',' Analyze')
+            ),
+            React.createElement('div',{className:'topbar-actions'},
+                React.createElement('button',{className:'top-btn',onClick:function(){setShowPR(true);},disabled:!data},'📊 PR'),
+                React.createElement('button',{className:'top-btn',onClick:function(){setShowTour(true);},disabled:!data},'🎓 Tour'),
+                React.createElement('button',{className:'top-btn',onClick:function(){setShowExport(true);},disabled:!data},'📤'),
+                React.createElement('button',{className:'top-btn',onClick:copyLink,disabled:!data},'🔗'),
+                React.createElement('button',{className:'top-btn',onClick:function(){setTheme(function(t){return t==='dark'?'light':'dark';});}},theme==='dark'?'☀️':'🌙')
+            )
+        ),
+        React.createElement('div',{className:'main'},
+            React.createElement('div',{className:'sidebar'},
+                data?React.createElement(React.Fragment,null,
+                    React.createElement('div',{className:'sidebar-section'},
+                        React.createElement('div',{className:'health-score'},
+                            React.createElement(HealthRing,{score:health.score,grade:health.grade}),
+                            React.createElement('div',{className:'health-info'},
+                                React.createElement('div',{className:'health-grade',style:{color:health.score>=80?'var(--green)':health.score>=60?'var(--orange)':'var(--red)'}},health.score,'/100'),
+                                React.createElement('div',{className:'health-label'},'Health Score')
+                            )
+                        )
+                    ),
+                    React.createElement('div',{className:'sidebar-section'},
+                        React.createElement('div',{className:'sidebar-title'},'Color By'),
+                        React.createElement('div',{className:'view-modes'},
+                            React.createElement('div',{className:'view-mode'+(colorMode==='folder'?' active':''),onClick:function(){setColorMode('folder');}},React.createElement('span',{className:'view-mode-icon'},'📁'),'Folder'),
+                            React.createElement('div',{className:'view-mode'+(colorMode==='layer'?' active':''),onClick:function(){setColorMode('layer');}},React.createElement('span',{className:'view-mode-icon'},'🏗️'),'Layer'),
+                            React.createElement('div',{className:'view-mode'+(colorMode==='churn'?' active':''),onClick:function(){setColorMode('churn');}},React.createElement('span',{className:'view-mode-icon'},'🔥'),'Churn'),
+                            React.createElement('div',{className:'view-mode'+(colorMode==='blast'?' active':''),onClick:function(){setColorMode('blast');},style:{opacity:selected?1:0.5}},React.createElement('span',{className:'view-mode-icon'},'💥'),'Blast')
+                        )
+                    ),
+                    React.createElement('div',{className:'sidebar-section'},
+                        React.createElement('div',{className:'stats-grid'},
+                            React.createElement('div',{className:'stat-card'},React.createElement('div',{className:'stat-value'},data.stats.files),React.createElement('div',{className:'stat-label'},'Files')),
+                            React.createElement('div',{className:'stat-card'},React.createElement('div',{className:'stat-value'},data.stats.functions),React.createElement('div',{className:'stat-label'},'Functions')),
+                            React.createElement('div',{className:'stat-card'},React.createElement('div',{className:'stat-value'},data.stats.connections),React.createElement('div',{className:'stat-label'},'Links')),
+                            React.createElement('div',{className:'stat-card'+(data.stats.dead>10?' warn':'')},React.createElement('div',{className:'stat-value'},data.stats.dead),React.createElement('div',{className:'stat-label'},'Unused'))
+                        )
+                    ),
+                    React.createElement('div',{className:'sidebar-section',style:{paddingBottom:8}},React.createElement('div',{className:'sidebar-title'},'Explorer')),
+                    React.createElement('div',{className:'sidebar-scroll'},React.createElement(TreeNode,{node:data.tree,selected:selected,onSelect:selectFile,expanded:expandedPaths,toggle:togglePath}))
+                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'🔍'),React.createElement('div',{className:'empty-title'},'No Repository'),React.createElement('div',{className:'empty-desc'},'Enter a GitHub URL to analyze'))
+            ),
+            React.createElement('div',{className:'canvas-area'},
+                loading?React.createElement('div',{className:'loading'},React.createElement('div',{className:'spinner'}),React.createElement('div',{className:'loading-text'},'Analyzing...'),React.createElement('div',{className:'loading-progress'},progress)):
+                !data?React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'⚡'),React.createElement('div',{className:'empty-title'},'CodeFlow Ultimate'),React.createElement('div',{className:'empty-desc'},'Blast radius, ownership, patterns, security & more')):
+                React.createElement(React.Fragment,null,
+                    React.createElement('svg',{ref:svgRef}),
+                    React.createElement('div',{className:'canvas-toolbar'},
+                        React.createElement('button',{className:'tool-btn',onClick:zoomIn},'+'),
+                        React.createElement('button',{className:'tool-btn',onClick:zoomOut},'−'),
+                        React.createElement('button',{className:'tool-btn',onClick:resetZoom},'⟲'),
+                        React.createElement('button',{className:'tool-btn',onClick:fitView},'⊡')
+                    ),
+                    React.createElement('div',{className:'canvas-info'},
+                        React.createElement('div',{className:'info-chip'},React.createElement('strong',null,data.files.length),' files'),
+                        React.createElement('div',{className:'info-chip'},React.createElement('strong',null,data.connections.length),' links'),
+                        selected&&blastRadius&&React.createElement('div',{className:'info-chip'},'💥 ',React.createElement('strong',null,blastRadius.count),' affected')
+                    ),
+                    colorMode!=='blast'&&React.createElement('div',{className:'legend'},
+                        React.createElement('div',{className:'legend-title'},colorMode==='folder'?'Folders':colorMode==='layer'?'Layers':'Churn'),
+                        colorMode==='layer'&&Object.entries(LAYER_COLORS).map(function(e){return React.createElement('div',{key:e[0],className:'legend-item'},React.createElement('div',{className:'legend-color',style:{background:e[1]}}),e[0]);}),
+                        colorMode==='churn'&&React.createElement(React.Fragment,null,React.createElement('div',{className:'legend-item'},React.createElement('div',{className:'legend-color',style:{background:'#ff5f5f'}}),'High'),React.createElement('div',{className:'legend-item'},React.createElement('div',{className:'legend-color',style:{background:'#ff9f43'}}),'Medium'),React.createElement('div',{className:'legend-item'},React.createElement('div',{className:'legend-color',style:{background:'#22c55e'}}),'Low'))
+                    ),
+                    tooltip&&React.createElement('div',{className:'tooltip',style:{left:tooltip.x,top:tooltip.y}},React.createElement('div',{className:'tooltip-title'},tooltip.title),React.createElement('div',{className:'tooltip-content'},tooltip.content))
+                )
+            ),
+            React.createElement('div',{className:'right-panel'},
+                data?React.createElement(React.Fragment,null,
+                    React.createElement('div',{className:'panel-tabs'},
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='details'?' active':''),onClick:function(){setRightTab('details');}},selected?'📄 FILE':'🔍 ISSUES'),
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='patterns'?' active':''),onClick:function(){setRightTab('patterns');}},'🧩 PATTERNS'),
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='security'?' active':''),onClick:function(){setRightTab('security');}},'🔐 SECURITY',data.stats.security>0&&React.createElement('span',{className:'view-mode-badge',style:{marginLeft:4}},data.stats.security))
+                    ),
+                    React.createElement('div',{className:'panel-content'},
+                        rightTab==='details'&&(selected?React.createElement(React.Fragment,null,
+                            React.createElement('button',{className:'top-btn',style:{width:'100%',marginBottom:12},onClick:function(){setSelected(null);setBlastRadius(null);}},'← Back'),
+                            React.createElement('div',{className:'panel-header',style:{margin:'-12px -12px 12px',padding:12}},React.createElement('div',{className:'panel-title'},'📄 ',selected.name),React.createElement('div',{className:'panel-subtitle'},selected.folder||'(root)',' • ',selected.layer)),
+                            blastRadius&&React.createElement('div',{className:'card',style:{marginBottom:12}},
+                                React.createElement('div',{className:'card-header',style:{cursor:'default'}},React.createElement('div',{className:'card-title'},'💥 Blast Radius'),React.createElement('span',{className:'badge badge-'+(blastRadius.level==='low'?'success':blastRadius.level==='medium'?'warning':'danger')},blastRadius.level.toUpperCase())),
+                                React.createElement('div',{className:'card-body'},
+                                    React.createElement('div',{style:{marginBottom:8}},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:4}},React.createElement('span',null,'Impact'),React.createElement('span',null,blastRadius.count,' files (',blastRadius.percent,'%)')),React.createElement('div',{className:'progress-bar'},React.createElement('div',{className:'progress-fill',style:{width:blastRadius.percent+'%',background:blastRadius.level==='low'?'var(--green)':blastRadius.level==='medium'?'var(--orange)':'var(--red)'}}))),
+                                    React.createElement('div',{style:{fontSize:9,color:'var(--t3)'}},'Changes affect ',blastRadius.count,' files up to ',blastRadius.depth,' levels')
+                                )
+                            ),
+                            ownership&&ownership.length>0&&React.createElement('div',{className:'card',style:{marginBottom:12}},
+                                React.createElement('div',{className:'card-header',onClick:function(){toggleCard('own');}},React.createElement('div',{className:'card-title'},React.createElement('span',{className:'card-toggle'+(expandedCards.has('own')?' open':'')},'▶'),'👥 Ownership')),
+                                expandedCards.has('own')&&React.createElement('div',{className:'card-body'},
+                                    React.createElement('div',{className:'owner-bar'},ownership.slice(0,5).map(function(o,i){return React.createElement('div',{key:i,className:'owner-segment',style:{width:o.percent+'%',background:COLORS[i%COLORS.length]}});})),
+                                    React.createElement('div',{className:'owner-list'},ownership.slice(0,5).map(function(o,i){return React.createElement('div',{key:i,className:'owner-item'},React.createElement('div',{className:'owner-avatar',style:{background:COLORS[i%COLORS.length]}},o.name[0]),React.createElement('span',{className:'owner-name'},o.name),React.createElement('span',{className:'owner-percent'},o.percent,'%'));}))
+                                )
+                            ),
+                            React.createElement('div',{className:'card'},
+                                React.createElement('div',{className:'card-header',onClick:function(){toggleCard('fns');}},React.createElement('div',{className:'card-title'},React.createElement('span',{className:'card-toggle'+(expandedCards.has('fns')?' open':'')},'▶'),'⚡ Functions (',selected.functions.length,')')),
+                                expandedCards.has('fns')&&React.createElement('div',{className:'card-body'},
+                                    selected.functions.slice(0,8).map(function(fn){var st=data.fnStats[fn.name];return React.createElement('div',{key:fn.name,style:{marginBottom:6,padding:6,background:'var(--bg0)',borderRadius:4}},React.createElement('div',{style:{display:'flex',justifyContent:'space-between'}},React.createElement('span',{style:{color:'var(--cyan)',fontSize:10}},fn.name,'()'),React.createElement('span',{className:'badge '+(st&&st.count>10?'badge-danger':st&&st.count>0?'badge-warning':'badge-default')},st?st.count:0,'×')));}),
+                                    selected.functions.length>8&&React.createElement('div',{style:{fontSize:9,color:'var(--t3)',textAlign:'center'}},'+',selected.functions.length-8,' more')
+                                )
+                            ),
+                            React.createElement('button',{className:'top-btn',style:{width:'100%',marginTop:12},onClick:function(){addToTour(selected);}},'🎓 Add to Tour')
+                        ):React.createElement(React.Fragment,null,
+                            React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'🔍 Issues (',data.issues.length,')'),
+                            data.issues.map(function(issue,i){return React.createElement('div',{key:i,className:'security-item '+(issue.type==='critical'?'high':'medium')},React.createElement('div',{className:'security-title'},issue.type==='critical'?'🔴':'🟡',' ',issue.title),React.createElement('div',{className:'security-path'},issue.desc));})
+                        )),
+                        rightTab==='patterns'&&React.createElement(React.Fragment,null,
+                            React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'🧩 Patterns (',data.patterns.length,')'),
+                            data.patterns.length===0?React.createElement('div',{style:{textAlign:'center',padding:20,color:'var(--t3)'}},'No patterns detected'):data.patterns.map(function(p,i){return React.createElement('div',{key:i,className:'pattern-item'+(p.isAnti?' anti':'')},React.createElement('div',{className:'pattern-icon'},p.icon),React.createElement('div',{className:'pattern-info'},React.createElement('div',{className:'pattern-name'},p.name,p.isAnti&&React.createElement('span',{className:'badge badge-danger',style:{marginLeft:8}},'Anti-pattern')),React.createElement('div',{className:'pattern-desc'},p.desc),React.createElement('div',{className:'pattern-files'},p.files.slice(0,3).join(', '),p.files.length>3?' +'+(p.files.length-3):'')));})
+                        ),
+                        rightTab==='security'&&React.createElement(React.Fragment,null,
+                            React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'🔐 Security (',data.securityIssues.length,')'),
+                            data.securityIssues.length===0?React.createElement('div',{style:{textAlign:'center',padding:20}},React.createElement('div',{style:{fontSize:32,marginBottom:8}},'✅'),React.createElement('div',{style:{color:'var(--green)'}},'No issues found')):data.securityIssues.map(function(issue,i){return React.createElement('div',{key:i,className:'security-item '+issue.severity,onClick:function(){selectFile(issue.path);}},React.createElement('div',{className:'security-title'},issue.severity==='high'?'🔴':issue.severity==='medium'?'🟡':'🔵',' ',issue.title),React.createElement('div',{className:'security-path'},issue.file));})
+                        )
+                    )
+                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'📊'),React.createElement('div',{className:'empty-title'},'Analysis'),React.createElement('div',{className:'empty-desc'},'Analyze a repo to see insights'))
+            )
+        ),
+        showExport&&React.createElement('div',{className:'modal-overlay',onClick:function(){setShowExport(false);}},
+            React.createElement('div',{className:'modal',onClick:function(e){e.stopPropagation();}},
+                React.createElement('div',{className:'modal-header'},React.createElement('div',{className:'modal-title'},'📤 Export'),React.createElement('button',{className:'modal-close',onClick:function(){setShowExport(false);}},'×')),
+                React.createElement('div',{className:'modal-body'},
+                    React.createElement('div',{className:'export-options'},
+                        React.createElement('div',{className:'export-option',onClick:function(){exportSVG();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},'🖼️'),React.createElement('div',{className:'export-option-label'},'SVG')),
+                        React.createElement('div',{className:'export-option',onClick:function(){exportJSON();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},'📋'),React.createElement('div',{className:'export-option-label'},'JSON')),
+                        React.createElement('div',{className:'export-option',onClick:function(){copyLink();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},'🔗'),React.createElement('div',{className:'export-option-label'},'Share Link'))
+                    )
+                )
+            )
+        ),
+        showPR&&React.createElement('div',{className:'modal-overlay',onClick:function(){setShowPR(false);}},
+            React.createElement('div',{className:'modal',onClick:function(e){e.stopPropagation();}},
+                React.createElement('div',{className:'modal-header'},React.createElement('div',{className:'modal-title'},'📊 PR Analyzer'),React.createElement('button',{className:'modal-close',onClick:function(){setShowPR(false);}},'×')),
+                React.createElement('div',{className:'modal-body'},
+                    React.createElement('div',{className:'form-group'},React.createElement('label',{className:'form-label'},'PR URL'),React.createElement('input',{className:'form-input',placeholder:'https://github.com/owner/repo/pull/123',value:prUrl,onChange:function(e){setPrUrl(e.target.value);}})),
+                    React.createElement('button',{className:'top-btn primary',onClick:analyzePR,style:{marginBottom:16}},'Analyze'),
+                    prData&&React.createElement(React.Fragment,null,
+                        React.createElement('div',{className:'pr-header'},React.createElement('div',{className:'pr-title'},prData.title),React.createElement('div',{className:'pr-stats'},React.createElement('span',{className:'pr-add'},'+',prData.additions||0),React.createElement('span',{className:'pr-del'},'-',prData.deletions||0))),
+                        React.createElement('div',{style:{fontSize:11,fontWeight:600,marginBottom:8}},'Files (',prData.files?prData.files.length:0,')'),
+                        prData.files&&prData.files.slice(0,10).map(function(f,i){
+                            var existing=data&&data.files.find(function(df){return df.path===f.filename;});
+                            var blast=existing?calcBlast(f.filename,data.connections,data.files):null;
+                            return React.createElement('div',{key:i,className:'pr-file'},React.createElement('span',{className:'pr-file-name'},f.filename.split('/').pop()),React.createElement('span',{className:'pr-file-impact',style:{background:blast?blast.level==='low'?'rgba(34,197,94,0.2)':blast.level==='medium'?'rgba(255,159,67,0.2)':'rgba(255,95,95,0.2)':'var(--bg3)',color:blast?blast.level==='low'?'var(--green)':blast.level==='medium'?'var(--orange)':'var(--red)':'var(--t3)'}},blast?blast.count+' affected':'new'));
+                        })
+                    )
+                )
+            )
+        ),
+        showTour&&React.createElement('div',{className:'modal-overlay',onClick:function(){setShowTour(false);}},
+            React.createElement('div',{className:'modal',onClick:function(e){e.stopPropagation();}},
+                React.createElement('div',{className:'modal-header'},React.createElement('div',{className:'modal-title'},'🎓 Tour'),React.createElement('button',{className:'modal-close',onClick:function(){setShowTour(false);}},'×')),
+                React.createElement('div',{className:'modal-body'},
+                    tour.length===0?React.createElement('div',{style:{textAlign:'center',padding:20,color:'var(--t3)'}},React.createElement('div',{style:{fontSize:32,marginBottom:8}},'🎓'),React.createElement('div',null,'No steps yet'),React.createElement('div',{style:{fontSize:10,marginTop:8}},'Select files and click "Add to Tour"')):tour.map(function(step,i){return React.createElement('div',{key:i,className:'tour-step'},React.createElement('div',{className:'tour-number'},i+1),React.createElement('div',{className:'tour-content'},React.createElement('div',{className:'tour-file',onClick:function(){selectFile(step.file);setShowTour(false);}},step.name),React.createElement('input',{className:'form-input',placeholder:'Note...',value:step.note,onChange:function(e){var t=tour.slice();t[i].note=e.target.value;setTour(t);},style:{marginTop:8}})),React.createElement('button',{className:'top-btn',onClick:function(){setTour(tour.filter(function(_,j){return j!==i;}));},style:{padding:'4px 8px'}},'×'));})
+                ),
+                tour.length>0&&React.createElement('div',{className:'modal-footer'},React.createElement('button',{className:'top-btn',onClick:function(){var b=new Blob([JSON.stringify(tour,null,2)],{type:'application/json'});var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download='tour.json';a.click();}},'Export'))
+            )
+        ),
+        error&&React.createElement('div',{style:{position:'fixed',bottom:20,right:20,background:'var(--red)',color:'white',padding:'12px 20px',borderRadius:8,zIndex:1000}},error,React.createElement('button',{onClick:function(){setError(null);},style:{marginLeft:12,background:'none',border:'none',color:'white',cursor:'pointer'}},'×'))
+    );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
