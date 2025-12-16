@@ -407,6 +407,140 @@ const Parser={
         if(longFiles.length)patterns.push({name:'Long File',icon:'📜',desc:'Files over 500 lines are harder to maintain. Consider breaking into smaller modules.',severity:'warning',isAnti:true,files:longFiles.map(function(f){return{name:f.name,path:f.path,lines:f.lines};}),metrics:{files:longFiles.length,avgLines:Math.round(longFiles.reduce(function(s,f){return s+f.lines;},0)/longFiles.length)}});
         return patterns;
     },
+    detectDuplicates:function(files,allFns){
+        var duplicates=[];
+        // Group functions by name
+        var fnByName={};
+        allFns.forEach(function(fn){
+            if(!fnByName[fn.name])fnByName[fn.name]=[];
+            fnByName[fn.name].push(fn);
+        });
+        // Find duplicate names across different files
+        Object.entries(fnByName).forEach(function(entry){
+            var name=entry[0],fns=entry[1];
+            var uniqueFiles=[...new Set(fns.map(function(f){return f.file;}))];
+            if(uniqueFiles.length>1){
+                duplicates.push({
+                    type:'name',
+                    name:name,
+                    count:uniqueFiles.length,
+                    files:fns.map(function(f){return{file:f.file,line:f.line};}),
+                    suggestion:'Consider renaming or consolidating "'+name+'" - found in '+uniqueFiles.length+' files'
+                });
+            }
+        });
+        // Find similar code (simple hash-based detection)
+        var codeHashes={};
+        allFns.forEach(function(fn){
+            if(!fn.code||fn.code.length<50)return;
+            // Normalize code: remove whitespace, comments, variable names
+            var normalized=fn.code.replace(/\/\/.*$/gm,'').replace(/\/\*[\s\S]*?\*\//g,'').replace(/\s+/g,' ').replace(/['"`][^'"`]*['"`]/g,'STR').replace(/\b\d+\b/g,'NUM').trim();
+            var hash=normalized.substring(0,200);
+            if(!codeHashes[hash])codeHashes[hash]=[];
+            codeHashes[hash].push(fn);
+        });
+        Object.values(codeHashes).forEach(function(fns){
+            if(fns.length>1){
+                var uniqueFiles=[...new Set(fns.map(function(f){return f.file;}))];
+                if(uniqueFiles.length>1){
+                    duplicates.push({
+                        type:'code',
+                        name:fns.map(function(f){return f.name;}).join(', '),
+                        count:fns.length,
+                        files:fns.map(function(f){return{file:f.file,name:f.name,line:f.line};}),
+                        suggestion:'Similar code detected - consider extracting to a shared utility'
+                    });
+                }
+            }
+        });
+        return duplicates;
+    },
+    detectLayerViolations:function(files,connections){
+        var violations=[];
+        var layerOrder={presentation:0,ui:0,component:0,page:0,view:0,feature:1,service:2,api:2,data:3,model:3,util:4,utils:4,helper:4,lib:4,core:4};
+        connections.forEach(function(c){
+            var srcFile=files.find(function(f){return f.path===c.source;});
+            var tgtFile=files.find(function(f){return f.path===c.target;});
+            if(!srcFile||!tgtFile)return;
+            var srcLayer=(srcFile.layer||'').toLowerCase();
+            var tgtLayer=(tgtFile.layer||'').toLowerCase();
+            var srcLevel=layerOrder[srcLayer];
+            var tgtLevel=layerOrder[tgtLayer];
+            // Violation: lower layer importing from higher layer (e.g., service importing from UI)
+            if(srcLevel!==undefined&&tgtLevel!==undefined&&srcLevel>tgtLevel&&srcLevel-tgtLevel>1){
+                violations.push({
+                    from:srcFile.path,
+                    fromLayer:srcFile.layer,
+                    to:tgtFile.path,
+                    toLayer:tgtFile.layer,
+                    fn:c.fn,
+                    suggestion:srcFile.layer+' should not import from '+tgtFile.layer+'. Consider inverting the dependency or using dependency injection.'
+                });
+            }
+        });
+        return violations;
+    },
+    calcComplexity:function(content){
+        if(!content)return{score:0,level:'low'};
+        // Approximate cyclomatic complexity
+        var complexity=1;
+        var patterns=[/\bif\s*\(/g,/\belse\s+if\s*\(/g,/\bwhile\s*\(/g,/\bfor\s*\(/g,/\bcase\s+/g,/\bcatch\s*\(/g,/\?\s*[^:]+\s*:/g,/&&/g,/\|\|/g];
+        patterns.forEach(function(p){var m=content.match(p);if(m)complexity+=m.length;});
+        var level='low';
+        if(complexity>30)level='critical';
+        else if(complexity>20)level='high';
+        else if(complexity>10)level='medium';
+        return{score:complexity,level:level};
+    },
+    generateSuggestions:function(data){
+        var suggestions=[];
+        // Based on dead functions
+        if(data.stats.dead>10){
+            suggestions.push({priority:'high',icon:'🧹',title:'Remove Dead Code',desc:data.stats.dead+' unused functions detected. Removing them will improve maintainability and reduce bundle size.',action:'Review unused functions in the Issues panel',impact:'Reduces codebase by ~'+(data.stats.dead*15)+' lines'});
+        }
+        // Based on circular dependencies
+        var circular=data.issues.filter(function(i){return i.title&&i.title.includes('Circular');});
+        if(circular.length){
+            suggestions.push({priority:'critical',icon:'🔄',title:'Break Circular Dependencies',desc:circular.length+' circular dependencies found. These cause tight coupling and make testing difficult.',action:'Extract shared code to a new module or use dependency injection',impact:'Improves testability and modularity'});
+        }
+        // Based on god files
+        var godFiles=data.issues.filter(function(i){return i.title&&i.title.includes('Large');});
+        if(godFiles.length){
+            suggestions.push({priority:'high',icon:'✂️',title:'Split Large Files',desc:godFiles.length+' files have too many functions. Split by responsibility.',action:'Group related functions and extract to separate modules',impact:'Improves code navigation and testing'});
+        }
+        // Based on high coupling
+        var coupling=data.issues.filter(function(i){return i.title&&i.title.includes('Coupled');});
+        if(coupling.length){
+            suggestions.push({priority:'medium',icon:'🔗',title:'Reduce Coupling',desc:coupling.length+' files are imported by many others. Consider if this is intentional.',action:'Review if these should be split or if importers should be consolidated',impact:'Reduces blast radius of changes'});
+        }
+        // Based on duplicates
+        if(data.duplicates&&data.duplicates.length>0){
+            var nameDups=data.duplicates.filter(function(d){return d.type==='name';});
+            var codeDups=data.duplicates.filter(function(d){return d.type==='code';});
+            if(nameDups.length){
+                suggestions.push({priority:'medium',icon:'📛',title:'Resolve Naming Conflicts',desc:nameDups.length+' function names are duplicated across files. This can cause confusion.',action:'Rename functions to be more specific or consolidate into shared module',impact:'Prevents bugs from importing wrong function'});
+            }
+            if(codeDups.length){
+                suggestions.push({priority:'high',icon:'📋',title:'Extract Duplicated Code',desc:codeDups.length+' instances of similar code found. DRY principle violation.',action:'Create shared utility functions',impact:'Reduces maintenance burden and potential bugs'});
+            }
+        }
+        // Based on layer violations
+        if(data.layerViolations&&data.layerViolations.length>0){
+            suggestions.push({priority:'high',icon:'🏗️',title:'Fix Architecture Violations',desc:data.layerViolations.length+' layer violations found. Lower layers should not depend on higher layers.',action:'Invert dependencies or use interfaces/events',impact:'Improves architecture and testability'});
+        }
+        // Based on security
+        var highSec=data.securityIssues?data.securityIssues.filter(function(s){return s.severity==='high';}):[];
+        if(highSec.length){
+            suggestions.push({priority:'critical',icon:'🔐',title:'Fix Security Issues',desc:highSec.length+' high-severity security issues found.',action:'Address hardcoded secrets, injection risks immediately',impact:'Prevents potential security breaches'});
+        }
+        // Test coverage hint
+        var testFiles=data.files.filter(function(f){return f.name.includes('.test.')||f.name.includes('.spec.')||f.path.includes('__tests__');});
+        var testRatio=data.files.length>0?(testFiles.length/data.files.length*100):0;
+        if(testRatio<10&&data.files.length>10){
+            suggestions.push({priority:'medium',icon:'🧪',title:'Add Test Coverage',desc:'Only '+testFiles.length+' test files found ('+Math.round(testRatio)+'%). Consider adding more tests.',action:'Focus on testing critical paths and high-complexity files',impact:'Prevents regressions and improves confidence'});
+        }
+        return suggestions.sort(function(a,b){var p={critical:0,high:1,medium:2,low:3};return p[a.priority]-p[b.priority];});
+    },
     detectSecurity:function(files){
         var issues=[];
         files.forEach(function(f){
@@ -1028,13 +1162,31 @@ function App(){
                 if(circular.length)issues.push({type:'critical',title:circular.length+' Circular Dependencies',desc:'Files that import each other',items:circular.slice(0,5).map(function(p){return{name:p.split('|').map(function(x){return x.split('/').pop();}).join(' ↔ ')};})});
                 var patterns=Parser.detectPatterns(analyzed);
                 var securityIssues=Parser.detectSecurity(analyzed);
+                var duplicates=Parser.detectDuplicates(analyzed,allFns);
+                var layerViolations=Parser.detectLayerViolations(analyzed,conns);
+                // Add complexity to each file
+                analyzed.forEach(function(f){f.complexity=Parser.calcComplexity(f.content);});
                 var folders=[...new Set(analyzed.map(function(f){return f.folder;}))].sort();
                 var tree=buildTree(analyzed);
                 var totalLoc=analyzed.reduce(function(s,f){return s+f.lines;},0);
                 var langStats={};
                 analyzed.forEach(function(f){var ext=f.name.split('.').pop().toLowerCase();langStats[ext]=(langStats[ext]||0)+f.lines;});
                 var langArray=Object.entries(langStats).sort(function(a,b){return b[1]-a[1];}).map(function(e){return{ext:e[0],lines:e[1],pct:Math.round(e[1]/totalLoc*100)};});
-                setData({files:analyzed,functions:allFns,connections:conns,fnStats:fnStats,folders:folders,tree:tree,issues:issues,patterns:patterns,securityIssues:securityIssues,deadFunctions:deadFns.map(function(x){var codeLines=x[1].code?x[1].code.split('\n').length:0;return{name:x[0],file:x[1].file,folder:x[1].folder,line:x[1].line,code:x[1].code,codeLines:codeLines,ext:x[1].file.split('.').pop()};}),stats:{files:analyzed.length,functions:allFns.length,connections:conns.length,dead:deadFns.length,patterns:patterns.length,security:securityIssues.filter(function(i){return i.severity==='high';}).length,loc:totalLoc,languages:langArray}});
+                // Add duplicate issues
+                if(duplicates.length>0){
+                    var nameDups=duplicates.filter(function(d){return d.type==='name';});
+                    var codeDups=duplicates.filter(function(d){return d.type==='code';});
+                    if(nameDups.length)issues.push({type:'warning',title:nameDups.length+' Duplicate Function Names',desc:'Same function name in multiple files',items:nameDups.slice(0,5).map(function(d){return{name:d.name+' ('+d.count+' files)',suggestion:d.suggestion};})});
+                    if(codeDups.length)issues.push({type:'warning',title:codeDups.length+' Similar Code Blocks',desc:'Copy-paste code detected',items:codeDups.slice(0,5).map(function(d){return{name:d.name,suggestion:d.suggestion};})});
+                }
+                if(layerViolations.length>0){
+                    issues.push({type:'critical',title:layerViolations.length+' Architecture Violations',desc:'Lower layers importing from higher layers',items:layerViolations.slice(0,5).map(function(v){return{name:v.fromLayer+' → '+v.toLayer,file:v.from,suggestion:v.suggestion};})});
+                }
+                var highComplexity=analyzed.filter(function(f){return f.complexity&&f.complexity.level==='critical';});
+                if(highComplexity.length)issues.push({type:'warning',title:highComplexity.length+' High Complexity Files',desc:'Files with complexity score >30',items:highComplexity.slice(0,5).map(function(f){return{name:f.name+' ('+f.complexity.score+')',file:f.path};})});
+                var dataObj={files:analyzed,functions:allFns,connections:conns,fnStats:fnStats,folders:folders,tree:tree,issues:issues,patterns:patterns,securityIssues:securityIssues,duplicates:duplicates,layerViolations:layerViolations,deadFunctions:deadFns.map(function(x){var codeLines=x[1].code?x[1].code.split('\n').length:0;return{name:x[0],file:x[1].file,folder:x[1].folder,line:x[1].line,code:x[1].code,codeLines:codeLines,ext:x[1].file.split('.').pop()};}),stats:{files:analyzed.length,functions:allFns.length,connections:conns.length,dead:deadFns.length,patterns:patterns.length,security:securityIssues.filter(function(i){return i.severity==='high';}).length,duplicates:duplicates.length,violations:layerViolations.length,loc:totalLoc,languages:langArray}};
+                dataObj.suggestions=Parser.generateSuggestions(dataObj);
+                setData(dataObj);
                 setExpandedPaths(new Set(['']));
                 var newUrl=window.location.pathname+'?repo='+encodeURIComponent(p.owner+'/'+p.repo);
                 window.history.replaceState({},'',newUrl);
@@ -2020,12 +2172,13 @@ function App(){
                     React.createElement('div',{className:'panel-tabs'},
                         React.createElement('button',{className:'panel-tab'+(rightTab==='details'?' active':''),onClick:function(){setRightTab('details');}},selected?'📄 FILE':'🔍 ISSUES'),
                         React.createElement('button',{className:'panel-tab'+(rightTab==='patterns'?' active':''),onClick:function(){setRightTab('patterns');}},'🧩 PATTERNS ',React.createElement('span',{className:'badge badge-default'},data.patterns.length)),
-                        React.createElement('button',{className:'panel-tab'+(rightTab==='security'?' active':''),onClick:function(){setRightTab('security');}},'🔐 SECURITY',data.stats.security>0&&React.createElement('span',{className:'view-mode-badge',style:{marginLeft:4}},data.stats.security))
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='security'?' active':''),onClick:function(){setRightTab('security');}},'🔐 SECURITY',data.stats.security>0&&React.createElement('span',{className:'view-mode-badge',style:{marginLeft:4}},data.stats.security)),
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='suggestions'?' active':''),onClick:function(){setRightTab('suggestions');}},'💡 ACTIONS',data.suggestions&&data.suggestions.length>0&&React.createElement('span',{className:'view-mode-badge',style:{marginLeft:4}},data.suggestions.length))
                     ),
                     React.createElement('div',{className:'panel-content'},
                         rightTab==='details'&&(selected?React.createElement(React.Fragment,null,
                             React.createElement('button',{className:'top-btn',style:{width:'100%',marginBottom:12},onClick:function(){setSelected(null);setBlastRadius(null);if(nodesRef.current){nodesRef.current.selectAll('.nc').transition().duration(200).attr('opacity',1).attr('fill',getNodeColor);}if(linksRef.current){linksRef.current.transition().duration(200).attr('stroke-opacity',0.4).attr('stroke',theme==='light'?'#ccc':'#333');}}},'← Back to Issues'),
-                            React.createElement('div',{className:'panel-header',style:{margin:'-12px -12px 12px',padding:12}},React.createElement('div',{className:'panel-title'},'📄 ',selected.name),React.createElement('div',{className:'panel-subtitle'},selected.folder||'root',' • ',selected.layer,' • ',selected.lines,' lines')),
+                            React.createElement('div',{className:'panel-header',style:{margin:'-12px -12px 12px',padding:12}},React.createElement('div',{className:'panel-title'},'📄 ',selected.name),React.createElement('div',{className:'panel-subtitle'},selected.folder||'root',' • ',selected.layer,' • ',selected.lines,' lines',selected.complexity&&selected.complexity.score>0?' • Complexity: '+selected.complexity.score:'')),
                             blastRadius&&React.createElement('div',{className:'card',style:{marginBottom:12}},
                                 React.createElement('div',{className:'card-header',onClick:function(){toggleCard('blast');}},React.createElement('div',{className:'card-title'},React.createElement('span',{className:'card-toggle'+(expandedCards.has('blast')?' open':'')},'▶'),'💥 Impact Analysis'),React.createElement('span',{className:'badge badge-'+(blastRadius.level==='low'?'success':blastRadius.level==='medium'?'warning':'danger')},blastRadius.level.toUpperCase())),
                                 expandedCards.has('blast')&&React.createElement('div',{className:'card-body'},
@@ -2225,6 +2378,34 @@ function App(){
                                     React.createElement('div',{className:'security-path'},issue.file,issue.line?' : Line '+issue.line:''),
                                     issue.code&&React.createElement('div',{className:'security-code'},issue.code)
                                 );})
+                            )
+                        ),
+                        rightTab==='suggestions'&&React.createElement(React.Fragment,null,
+                            React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'💡 Actionable Suggestions'),
+                            (!data.suggestions||data.suggestions.length===0)?React.createElement('div',{style:{textAlign:'center',padding:20}},React.createElement('div',{style:{fontSize:32,marginBottom:8}},'🎉'),React.createElement('div',{style:{color:'var(--green)',fontWeight:600}},'No issues to address!'),React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:8}},'Your codebase looks healthy')):
+                            React.createElement(React.Fragment,null,
+                                React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginBottom:12}},'Prioritized recommendations based on your codebase analysis'),
+                                data.suggestions.map(function(s,i){return React.createElement('div',{key:i,className:'suggestion-card',style:{background:'var(--bg0)',borderRadius:8,padding:12,marginBottom:10,borderLeft:'3px solid '+(s.priority==='critical'?'var(--red)':s.priority==='high'?'var(--orange)':'var(--acc)')}},
+                                    React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
+                                        React.createElement('span',{style:{fontSize:18}},s.icon),
+                                        React.createElement('span',{style:{fontWeight:600,fontSize:11}},s.title),
+                                        React.createElement('span',{className:'badge badge-'+(s.priority==='critical'?'danger':s.priority==='high'?'warning':'info'),style:{marginLeft:'auto',fontSize:8}},s.priority.toUpperCase())
+                                    ),
+                                    React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:8}},s.desc),
+                                    React.createElement('div',{style:{fontSize:9,background:'var(--bg2)',padding:'6px 8px',borderRadius:4,marginBottom:6}},
+                                        React.createElement('span',{style:{color:'var(--t3)'}},'Action: '),
+                                        React.createElement('span',{style:{color:'var(--t1)'}},s.action)
+                                    ),
+                                    React.createElement('div',{style:{fontSize:9,color:'var(--green)'}},'✓ ',s.impact)
+                                );}),
+                                data.duplicates&&data.duplicates.length>0&&React.createElement('div',{style:{marginTop:16}},
+                                    React.createElement('div',{style:{fontSize:11,fontWeight:600,marginBottom:8}},'📋 Duplicate Functions (',data.duplicates.length,')'),
+                                    data.duplicates.slice(0,10).map(function(d,i){return React.createElement('div',{key:i,style:{background:'var(--bg0)',borderRadius:6,padding:8,marginBottom:6,fontSize:10}},
+                                        React.createElement('div',{style:{fontWeight:600,color:d.type==='code'?'var(--purple)':'var(--orange)'}},d.type==='code'?'Similar Code':'Same Name',': ',d.name),
+                                        React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginTop:4}},d.files.slice(0,3).map(function(f){return f.file.split('/').pop();}).join(', '),d.files.length>3?' +'.concat(d.files.length-3,' more'):''),
+                                        React.createElement('div',{style:{fontSize:9,color:'var(--t2)',marginTop:4}},d.suggestion)
+                                    );})
+                                )
                             )
                         )
                     )
