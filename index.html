@@ -760,7 +760,7 @@ function App(){
     var _ab=useState(false),showGraphConfig=_ab[0],setShowGraphConfig=_ab[1];
     var _ac=useState(260),sidebarWidth=_ac[0],setSidebarWidth=_ac[1];
     var _ad=useState(360),rightPanelWidth=_ad[0],setRightPanelWidth=_ad[1];
-    var _ae=useState(false),legendCollapsed=_ae[0],setLegendCollapsed=_ae[1];
+    var _ae=useState(true),legendCollapsed=_ae[0],setLegendCollapsed=_ae[1];
     var svgRef=useRef(null);
     var treemapRef=useRef(null);
     var matrixRef=useRef(null);
@@ -1294,11 +1294,23 @@ function App(){
             }
         });
         var nodes=folders.map(function(f,i){return{id:i,name:f.split('/').pop()||'root',fullPath:f,fileCount:data.files.filter(function(x){return x.folder===f;}).length};});
-        var links=[];
+        // Merge bidirectional flows to avoid circular link errors
+        var linkMap={};
         Object.entries(flowMap).forEach(function(e){
             var parts=e[0].split('|'),val=e[1];
             var si=folderIdx[parts[0]],ti=folderIdx[parts[1]];
-            if(si!==undefined&&ti!==undefined&&si!==ti)links.push({source:si,target:ti,value:val});
+            if(si!==undefined&&ti!==undefined&&si!==ti){
+                var key=Math.min(si,ti)+'|'+Math.max(si,ti);
+                if(!linkMap[key])linkMap[key]={a:Math.min(si,ti),b:Math.max(si,ti),ab:0,ba:0};
+                if(si<ti)linkMap[key].ab+=val;else linkMap[key].ba+=val;
+            }
+        });
+        var links=[];
+        Object.values(linkMap).forEach(function(l){
+            var net=l.ab-l.ba;
+            if(net>0)links.push({source:l.a,target:l.b,value:net});
+            else if(net<0)links.push({source:l.b,target:l.a,value:-net});
+            else if(l.ab>0)links.push({source:l.a,target:l.b,value:l.ab});
         });
         if(links.length===0){
             g.append('text').attr('x',w/2-20).attr('y',h/2).attr('fill','var(--t3)').attr('font-size','12px').text('No cross-folder dependencies to visualize');
@@ -1709,6 +1721,7 @@ function App(){
                 React.createElement('input',{className:'repo-input','aria-label':'Repository URL',placeholder:'owner/repo or GitHub URL',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
                 React.createElement('input',{className:'repo-input',type:'password','aria-label':'GitHub Token',placeholder:'Token (optional)',value:token,onChange:function(e){setToken(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();},style:{maxWidth:120}}),
                 React.createElement('button',{id:'analyze-btn',className:'top-btn primary','aria-label':'Analyze repository',onClick:analyze,disabled:loading||!repoUrl},loading?'⏳':'🔍',' Analyze'),
+                data&&React.createElement('button',{className:'top-btn','aria-label':'Refresh analysis',onClick:analyze,disabled:loading,title:'Refresh Analysis'},'🔄'),
                 data&&React.createElement('button',{className:'reset-btn','aria-label':'Reset analysis',onClick:resetAnalysis,title:'Clear & Reset'},'✕ Reset')
             ),
             React.createElement('div',{className:'topbar-actions'},
