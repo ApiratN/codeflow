@@ -359,6 +359,54 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .conn-fn-count{color:var(--t3);font-size:8px}
 .conn-goto{margin-top:8px;padding:6px 10px;background:var(--accbg);color:var(--acc);border-radius:4px;font-size:9px;font-weight:600;cursor:pointer;text-align:center;transition:all 0.15s}
 .conn-goto:hover{background:var(--acc);color:var(--bg0)}
+.file-preview-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:1100;backdrop-filter:blur(4px)}
+.file-preview-modal{background:var(--bg0);border:1px solid var(--border);border-radius:12px;width:90vw;max-width:1000px;height:85vh;display:flex;flex-direction:column;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5)}
+.file-preview-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--bg1);border-bottom:1px solid var(--border);border-radius:12px 12px 0 0}
+.file-preview-title{display:flex;align-items:center;gap:10px}
+.file-preview-icon{font-size:18px}
+.file-preview-name{font-size:13px;font-weight:600;color:var(--t0)}
+.file-preview-path{font-size:10px;color:var(--t3);margin-left:8px;font-family:'JetBrains Mono',monospace}
+.file-preview-actions{display:flex;align-items:center;gap:8px}
+.file-preview-line-badge{font-size:10px;padding:4px 10px;background:var(--accbg);color:var(--acc);border-radius:6px;font-weight:600}
+.file-preview-close{background:transparent;border:1px solid var(--border);color:var(--t2);width:32px;height:32px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:all 0.15s}
+.file-preview-close:hover{background:var(--red);border-color:var(--red);color:white}
+.file-preview-content{flex:1;overflow:auto;position:relative}
+.file-preview-code{margin:0;padding:16px 0;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.6;background:var(--bg0);counter-reset:line;min-height:100%}
+.file-preview-line{display:flex;min-height:19px}
+.file-preview-line:hover{background:var(--bg2)}
+.file-preview-line.highlighted{background:rgba(0,255,157,0.15);border-left:3px solid var(--acc)}
+.file-preview-line.highlighted .file-preview-linenum{color:var(--acc);font-weight:600}
+.file-preview-linenum{display:inline-block;min-width:50px;padding:0 16px 0 16px;text-align:right;color:var(--t3);user-select:none;border-right:1px solid var(--border2);flex-shrink:0}
+.file-preview-text{flex:1;padding:0 16px;white-space:pre;overflow-x:visible;color:var(--t1)}
+.file-preview-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px}
+.file-preview-loading .spinner{width:32px;height:32px;border-width:2px}
+.file-preview-loading-text{font-size:11px;color:var(--t3)}
+.file-preview-error{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;color:var(--t3)}
+.file-preview-error-icon{font-size:48px;opacity:0.5}
+.view-file-btn{font-size:9px;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);color:var(--t2);border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;transition:all 0.15s}
+.view-file-btn:hover{background:var(--accbg);border-color:var(--acc);color:var(--acc)}
+.syn-kw{color:#c678dd}
+.syn-str{color:#98c379}
+.syn-num{color:#d19a66}
+.syn-com{color:#5c6370;font-style:italic}
+.syn-fn{color:#61afef}
+.syn-type{color:#e5c07b}
+.syn-op{color:#56b6c2}
+.syn-var{color:#e06c75}
+.syn-tag{color:#e06c75}
+.syn-attr{color:#d19a66}
+.syn-punct{color:#abb2bf}
+.light .syn-kw{color:#a626a4}
+.light .syn-str{color:#50a14f}
+.light .syn-num{color:#986801}
+.light .syn-com{color:#a0a1a7}
+.light .syn-fn{color:#4078f2}
+.light .syn-type{color:#c18401}
+.light .syn-op{color:#0184bc}
+.light .syn-var{color:#e45649}
+.light .syn-tag{color:#e45649}
+.light .syn-attr{color:#986801}
+.light .syn-punct{color:#383a42}
     </style>
 </head>
 <body>
@@ -1010,7 +1058,9 @@ function App(){
     var _ac=useState(260),sidebarWidth=_ac[0],setSidebarWidth=_ac[1];
     var _ad=useState(360),rightPanelWidth=_ad[0],setRightPanelWidth=_ad[1];
     var _ae=useState(true),legendCollapsed=_ae[0],setLegendCollapsed=_ae[1];
+    var _af=useState(null),filePreview=_af[0],setFilePreview=_af[1];// {path, content, line, filename, loading, error}
     var svgRef=useRef(null);
+    var filePreviewRef=useRef(null);
     var treemapRef=useRef(null);
     var matrixRef=useRef(null);
     var dendroRef=useRef(null);
@@ -1238,6 +1288,82 @@ function App(){
     var togglePath=useCallback(function(p){setExpandedPaths(function(prev){var n=new Set(prev);if(n.has(p))n.delete(p);else n.add(p);return n;});},[]);
     var toggleCard=useCallback(function(id){setExpandedCards(function(prev){var n=new Set(prev);if(n.has(id))n.delete(id);else n.add(id);return n;});},[]);
     var toggleFn=useCallback(function(name){setExpandedFns(function(prev){var n=new Set(prev);if(n.has(name))n.delete(name);else n.add(name);return n;});},[]);
+
+    // Syntax highlighting function
+    function highlightSyntax(code,filename){
+        if(!code)return'';
+        var ext=(filename||'').split('.').pop().toLowerCase();
+        var isJS=['js','jsx','ts','tsx','mjs','cjs'].includes(ext);
+        var isPy=ext==='py';
+        var isJava=['java','kt','scala','cs','go'].includes(ext);
+        var isHTML=['html','htm','vue','svelte'].includes(ext);
+        var isCSS=['css','scss','sass','less'].includes(ext);
+        var isJSON=['json','yaml','yml','toml'].includes(ext);
+        var isRuby=['rb','rake'].includes(ext);
+        var isPHP=ext==='php';
+        function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+        // Split into tokens while preserving structure
+        var result=code.split('\n').map(function(line){
+            var escaped=esc(line);
+            // Comments
+            if(isJS||isJava||isPHP||isCSS)escaped=escaped.replace(/(\/\/.*$)/gm,'<span class="syn-com">$1</span>');
+            if(isPy||isRuby)escaped=escaped.replace(/(#.*$)/gm,'<span class="syn-com">$1</span>');
+            if(isHTML)escaped=escaped.replace(/(&lt;!--[\s\S]*?--&gt;)/g,'<span class="syn-com">$1</span>');
+            // Strings - careful with order
+            escaped=escaped.replace(/(&quot;[^&]*&quot;|'[^']*'|`[^`]*`)/g,'<span class="syn-str">$1</span>');
+            // Numbers
+            escaped=escaped.replace(/\b(\d+\.?\d*)\b/g,'<span class="syn-num">$1</span>');
+            // Keywords
+            if(isJS)escaped=escaped.replace(/\b(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|try|catch|finally|throw|new|class|extends|import|export|from|default|async|await|yield|typeof|instanceof|in|of|this|super|null|undefined|true|false|void|static|get|set)\b/g,'<span class="syn-kw">$1</span>');
+            if(isPy)escaped=escaped.replace(/\b(def|class|return|if|elif|else|for|while|try|except|finally|raise|import|from|as|with|pass|break|continue|lambda|yield|global|nonlocal|assert|True|False|None|and|or|not|in|is)\b/g,'<span class="syn-kw">$1</span>');
+            if(isJava)escaped=escaped.replace(/\b(public|private|protected|static|final|void|class|interface|extends|implements|return|if|else|for|while|do|switch|case|break|continue|try|catch|finally|throw|new|import|package|this|super|null|true|false)\b/g,'<span class="syn-kw">$1</span>');
+            if(isRuby)escaped=escaped.replace(/\b(def|class|module|end|return|if|elsif|else|unless|case|when|for|while|until|do|begin|rescue|ensure|raise|require|include|extend|attr_accessor|attr_reader|attr_writer|true|false|nil|self)\b/g,'<span class="syn-kw">$1</span>');
+            if(isPHP)escaped=escaped.replace(/\b(function|class|return|if|else|elseif|for|foreach|while|do|switch|case|break|continue|try|catch|finally|throw|new|public|private|protected|static|const|use|namespace|extends|implements|true|false|null)\b/g,'<span class="syn-kw">$1</span>');
+            if(isCSS)escaped=escaped.replace(/(@media|@import|@keyframes|@font-face|!important)/g,'<span class="syn-kw">$1</span>');
+            if(isHTML){escaped=escaped.replace(/(&lt;\/?)([\w-]+)/g,'$1<span class="syn-tag">$2</span>');escaped=escaped.replace(/([\w-]+)(=)/g,'<span class="syn-attr">$1</span>$2');}
+            // Function calls
+            escaped=escaped.replace(/\b([a-zA-Z_]\w*)\s*\(/g,'<span class="syn-fn">$1</span>(');
+            // Types (capitalized words in certain contexts)
+            if(isJS||isJava)escaped=escaped.replace(/:\s*([A-Z]\w*)/g,': <span class="syn-type">$1</span>');
+            return escaped;
+        });
+        return result;
+    }
+
+    // Open file preview
+    function openFilePreview(path,line){
+        if(!repoInfo)return;
+        var filename=path.split('/').pop();
+        setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:true,error:null});
+        // Check if we already have the content in data
+        if(data){
+            var existingFile=data.files.find(function(f){return f.path===path;});
+            if(existingFile&&existingFile.content){
+                setFilePreview({path:path,filename:filename,content:existingFile.content,line:line||null,loading:false,error:null});
+                return;
+            }
+        }
+        // Fetch from GitHub
+        GitHub.getFile(repoInfo.owner,repoInfo.repo,path).then(function(content){
+            if(content){
+                setFilePreview({path:path,filename:filename,content:content,line:line||null,loading:false,error:null});
+            }else{
+                setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:false,error:'Could not load file content'});
+            }
+        }).catch(function(e){
+            setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:false,error:e.message||'Failed to load file'});
+        });
+    }
+
+    // Scroll to highlighted line after file preview loads
+    useEffect(function(){
+        if(filePreview&&filePreview.content&&filePreview.line&&filePreviewRef.current){
+            setTimeout(function(){
+                var el=filePreviewRef.current.querySelector('.file-preview-line.highlighted');
+                if(el)el.scrollIntoView({behavior:'smooth',block:'center'});
+            },100);
+        }
+    },[filePreview]);
 
     var colorMap=useMemo(function(){
         if(!data)return{};
@@ -2179,7 +2305,15 @@ function App(){
                     React.createElement('div',{className:'panel-content'},
                         rightTab==='details'&&(selected?React.createElement(React.Fragment,null,
                             React.createElement('button',{className:'top-btn',style:{width:'100%',marginBottom:12},onClick:function(){setSelected(null);setBlastRadius(null);if(nodesRef.current){nodesRef.current.selectAll('.nc').transition().duration(200).attr('opacity',1).attr('fill',getNodeColor);}if(linksRef.current){linksRef.current.transition().duration(200).attr('stroke-opacity',0.4).attr('stroke',theme==='light'?'#ccc':'#333');}}},'← Back to Issues'),
-                            React.createElement('div',{className:'panel-header',style:{margin:'-12px -12px 12px',padding:12}},React.createElement('div',{className:'panel-title'},'📄 ',selected.name),React.createElement('div',{className:'panel-subtitle'},selected.folder||'root',' • ',selected.layer,' • ',selected.lines,' lines',selected.complexity&&selected.complexity.score>0?' • Complexity: '+selected.complexity.score:'')),
+                            React.createElement('div',{className:'panel-header',style:{margin:'-12px -12px 12px',padding:12}},
+                                React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}},
+                                    React.createElement('div',null,
+                                        React.createElement('div',{className:'panel-title'},'📄 ',selected.name),
+                                        React.createElement('div',{className:'panel-subtitle'},selected.folder||'root',' • ',selected.layer,' • ',selected.lines,' lines',selected.complexity&&selected.complexity.score>0?' • Complexity: '+selected.complexity.score:'')
+                                    ),
+                                    React.createElement('button',{className:'view-file-btn',onClick:function(){openFilePreview(selected.path);}},'👁️ View Source')
+                                )
+                            ),
                             blastRadius&&React.createElement('div',{className:'card',style:{marginBottom:12}},
                                 React.createElement('div',{className:'card-header',onClick:function(){toggleCard('blast');}},React.createElement('div',{className:'card-title'},React.createElement('span',{className:'card-toggle'+(expandedCards.has('blast')?' open':'')},'▶'),'💥 Impact Analysis'),React.createElement('span',{className:'badge badge-'+(blastRadius.level==='low'?'success':blastRadius.level==='medium'?'warning':'danger')},blastRadius.level.toUpperCase())),
                                 expandedCards.has('blast')&&React.createElement('div',{className:'card-body'},
@@ -2308,6 +2442,7 @@ function App(){
                                             React.createElement('div',{className:'fn-header',onClick:function(){toggleFn(fn.name);}},
                                                 React.createElement('span',{className:'fn-name'},fn.name,'()'),
                                                 React.createElement('span',{style:{display:'flex',alignItems:'center',gap:4}},
+                                                    React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();openFilePreview(selected.path,fn.line);},title:'View source'},'👁️'),
                                                     React.createElement('span',{className:'fn-line'},'L',fn.line),
                                                     React.createElement('span',{className:'badge badge-default',title:'Internal calls (same file)'},intCalls,' int'),
                                                     React.createElement('span',{className:'badge '+(extCalls>10?'badge-danger':extCalls>0?'badge-warning':'badge-default'),title:'External calls (other files)'},extCalls,' ext')
@@ -2565,7 +2700,10 @@ function App(){
                         drillDown.data.items&&drillDown.data.items.map(function(item,j){return React.createElement('div',{key:j,style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:8,borderLeft:'3px solid var(--acc)'}},
                             React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
                                 React.createElement('div',{style:{fontWeight:600,fontSize:11}},item.name),
-                                item.file&&React.createElement('button',{style:{fontSize:9,padding:'4px 8px',background:'var(--acc)',color:'var(--bg0)',border:'none',borderRadius:4,cursor:'pointer'},onClick:function(e){e.stopPropagation();selectFile(item.file);setDrillDown(null);}},'Go to file →')
+                                item.file&&React.createElement('div',{style:{display:'flex',gap:6}},
+                                    React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();openFilePreview(item.file,item.line);}},'👁️ View'),
+                                    React.createElement('button',{style:{fontSize:9,padding:'4px 8px',background:'var(--acc)',color:'var(--bg0)',border:'none',borderRadius:4,cursor:'pointer'},onClick:function(e){e.stopPropagation();selectFile(item.file);setDrillDown(null);}},'Go to file →')
+                                )
                             ),
                             item.file&&React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace'}},item.file,item.line?' : '+item.line:''),
                             (item.lines||item.fns||item.imports||item.score)&&React.createElement('div',{style:{display:'flex',gap:12,marginTop:8}},
@@ -2579,9 +2717,12 @@ function App(){
                             // For items with nested files (like duplicates)
                             item.files&&React.createElement('div',{style:{marginTop:8}},
                                 React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginBottom:4}},'Locations:'),
-                                item.files.map(function(f,k){return React.createElement('div',{key:k,style:{fontSize:9,color:'var(--t2)',padding:'4px 8px',background:'var(--bg2)',borderRadius:4,marginBottom:4,cursor:'pointer',display:'flex',justifyContent:'space-between'},onClick:function(){selectFile(f.file||f);setDrillDown(null);}},
-                                    React.createElement('span',{style:{fontFamily:'monospace'}},typeof f==='string'?f.split('/').pop():(f.file||'').split('/').pop(),f.line?' :'+f.line:''),
-                                    React.createElement('span',{style:{color:'var(--acc)'}},'→')
+                                item.files.map(function(f,k){return React.createElement('div',{key:k,style:{fontSize:9,color:'var(--t2)',padding:'4px 8px',background:'var(--bg2)',borderRadius:4,marginBottom:4,display:'flex',justifyContent:'space-between',alignItems:'center'}},
+                                    React.createElement('span',{style:{fontFamily:'monospace',cursor:'pointer',flex:1},onClick:function(){selectFile(f.file||f);setDrillDown(null);}},typeof f==='string'?f.split('/').pop():(f.file||'').split('/').pop(),f.line?' :'+f.line:''),
+                                    React.createElement('div',{style:{display:'flex',gap:4}},
+                                        React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();openFilePreview(f.file||f,f.line);}},'👁️'),
+                                        React.createElement('span',{style:{color:'var(--acc)',cursor:'pointer'},onClick:function(){selectFile(f.file||f);setDrillDown(null);}},'→')
+                                    )
                                 );})
                             )
                         );})
@@ -2599,9 +2740,12 @@ function App(){
                             );})
                         ),
                         React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'All Files (',drillDown.data.files.length,')'),
-                        drillDown.data.files.map(function(f,j){return React.createElement('div',{key:j,style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:8,cursor:'pointer',borderLeft:'3px solid var(--acc)'},onClick:function(){selectFile(f.path);setDrillDown(null);}},
-                            React.createElement('div',{style:{fontWeight:600,fontSize:11}},f.name),
-                            React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace'}},f.path),
+                        drillDown.data.files.map(function(f,j){return React.createElement('div',{key:j,style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:8,borderLeft:'3px solid var(--acc)'}},
+                            React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+                                React.createElement('div',{style:{fontWeight:600,fontSize:11,cursor:'pointer'},onClick:function(){selectFile(f.path);setDrillDown(null);}},f.name),
+                                React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();openFilePreview(f.path);}},'👁️ View')
+                            ),
+                            React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace',cursor:'pointer'},onClick:function(){selectFile(f.path);setDrillDown(null);}},f.path),
                             f.fns&&React.createElement('div',{style:{fontSize:10,color:'var(--orange)',marginTop:4}},f.fns,' functions'),
                             f.lines&&React.createElement('div',{style:{fontSize:10,color:'var(--purple)',marginTop:4}},f.lines,' lines')
                         );})
@@ -2613,9 +2757,12 @@ function App(){
                             React.createElement('div',{style:{fontSize:11,color:'var(--t2)'}},drillDown.data.desc)
                         ),
                         React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'Location'),
-                        React.createElement('div',{style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:16,cursor:'pointer'},onClick:function(){selectFile(drillDown.data.path);setDrillDown(null);}},
-                            React.createElement('div',{style:{fontWeight:600,fontSize:11}},drillDown.data.file),
-                            React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace'}},drillDown.data.path),
+                        React.createElement('div',{style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:16}},
+                            React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+                                React.createElement('div',{style:{fontWeight:600,fontSize:11,cursor:'pointer'},onClick:function(){selectFile(drillDown.data.path);setDrillDown(null);}},drillDown.data.file),
+                                React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();openFilePreview(drillDown.data.path,drillDown.data.line);}},'👁️ View')
+                            ),
+                            React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace',cursor:'pointer'},onClick:function(){selectFile(drillDown.data.path);setDrillDown(null);}},drillDown.data.path),
                             drillDown.data.line&&React.createElement('div',{style:{fontSize:10,color:'var(--orange)',marginTop:4}},'Line ',drillDown.data.line)
                         ),
                         drillDown.data.code&&React.createElement(React.Fragment,null,
@@ -2637,9 +2784,12 @@ function App(){
                             React.createElement('div',{style:{fontSize:11,color:'var(--t2)'}},drillDown.data.suggestion)
                         ),
                         React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'All Locations (',drillDown.data.files.length,')'),
-                        drillDown.data.files.map(function(f,j){return React.createElement('div',{key:j,style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:8,cursor:'pointer',borderLeft:'3px solid '+(drillDown.data.type==='code'?'var(--purple)':'var(--orange)')},onClick:function(){selectFile(f.file);setDrillDown(null);}},
-                            React.createElement('div',{style:{fontWeight:600,fontSize:11}},f.name||drillDown.data.name),
-                            React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace'}},f.file),
+                        drillDown.data.files.map(function(f,j){return React.createElement('div',{key:j,style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:8,borderLeft:'3px solid '+(drillDown.data.type==='code'?'var(--purple)':'var(--orange)')}},
+                            React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+                                React.createElement('div',{style:{fontWeight:600,fontSize:11,cursor:'pointer'},onClick:function(){selectFile(f.file);setDrillDown(null);}},f.name||drillDown.data.name),
+                                React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();openFilePreview(f.file,f.line);}},'👁️ View')
+                            ),
+                            React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace',cursor:'pointer'},onClick:function(){selectFile(f.file);setDrillDown(null);}},f.file),
                             f.line&&React.createElement('div',{style:{fontSize:10,color:'var(--orange)',marginTop:4}},'Line ',f.line)
                         );}),
                         React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12,marginTop:16}},'Suggested Action'),
@@ -2712,6 +2862,7 @@ function App(){
                                     )
                                 ),
                                 React.createElement('div',{className:'unused-fn-meta'},
+                                    React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();openFilePreview(fn.file,fn.line);},title:'View source'},'👁️'),
                                     React.createElement('span',{className:'unused-fn-lines'},fn.codeLines,' lines'),
                                     fn.line&&React.createElement('span',{className:'unused-fn-loc'},'L',fn.line),
                                     React.createElement('span',{style:{fontSize:10,color:'var(--t3)'}},isExpanded?'▼':'▶')
@@ -2731,6 +2882,39 @@ function App(){
             )
         ),
         toast&&React.createElement('div',{className:'toast '+(toast.type||'success'),'role':'alert'},toast.msg),
+        filePreview&&React.createElement('div',{className:'file-preview-overlay',onClick:function(){setFilePreview(null);}},
+            React.createElement('div',{className:'file-preview-modal',onClick:function(e){e.stopPropagation();}},
+                React.createElement('div',{className:'file-preview-header'},
+                    React.createElement('div',{className:'file-preview-title'},
+                        React.createElement('span',{className:'file-preview-icon'},Parser.isCode(filePreview.filename)?'📄':'📝'),
+                        React.createElement('span',{className:'file-preview-name'},filePreview.filename),
+                        React.createElement('span',{className:'file-preview-path'},filePreview.path)
+                    ),
+                    React.createElement('div',{className:'file-preview-actions'},
+                        filePreview.line&&React.createElement('span',{className:'file-preview-line-badge'},'Line ',filePreview.line),
+                        React.createElement('button',{className:'file-preview-close',onClick:function(){setFilePreview(null);}},'×')
+                    )
+                ),
+                React.createElement('div',{className:'file-preview-content',ref:filePreviewRef},
+                    filePreview.loading?React.createElement('div',{className:'file-preview-loading'},
+                        React.createElement('div',{className:'spinner'}),
+                        React.createElement('div',{className:'file-preview-loading-text'},'Loading file...')
+                    ):filePreview.error?React.createElement('div',{className:'file-preview-error'},
+                        React.createElement('div',{className:'file-preview-error-icon'},'⚠️'),
+                        React.createElement('div',null,filePreview.error)
+                    ):filePreview.content?React.createElement('pre',{className:'file-preview-code'},
+                        highlightSyntax(filePreview.content,filePreview.filename).map(function(lineHtml,i){
+                            var lineNum=i+1;
+                            var isHighlighted=filePreview.line&&lineNum===filePreview.line;
+                            return React.createElement('div',{key:i,className:'file-preview-line'+(isHighlighted?' highlighted':'')},
+                                React.createElement('span',{className:'file-preview-linenum'},lineNum),
+                                React.createElement('span',{className:'file-preview-text',dangerouslySetInnerHTML:{__html:lineHtml||' '}})
+                            );
+                        })
+                    ):null
+                )
+            )
+        ),
         error&&React.createElement('div',{style:{position:'fixed',bottom:20,right:20,background:'var(--red)',color:'white',padding:'12px 20px',borderRadius:8,zIndex:1000,maxWidth:350},'role':'alert'},error,React.createElement('button',{'aria-label':'Dismiss error',onClick:function(){setError(null);},style:{marginLeft:12,background:'none',border:'none',color:'white',cursor:'pointer',fontSize:16}},'×'))
     );
 }
