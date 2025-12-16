@@ -21,6 +21,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3-sankey/0.12.3/d3-sankey.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/acorn/8.11.3/acorn.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
     <style>
 :root{--bg0:#0a0a0c;--bg1:#0f0f12;--bg2:#161619;--bg3:#1c1c21;--bg4:#252529;--hover:#2a2a30;--border:#2d2d35;--border2:#222228;--t0:#f0f0f2;--t1:#c8c8cd;--t2:#8b8b95;--t3:#5c5c66;--acc:#00ff9d;--acc2:#00cc7d;--accbg:rgba(0,255,157,0.08);--blue:#4d9fff;--purple:#a78bfa;--orange:#ff9f43;--red:#ff5f5f;--cyan:#22d3ee;--pink:#ec4899;--green:#22c55e}
@@ -457,51 +458,194 @@ const Parser={
     },
     detectDuplicates:function(files,allFns){
         var duplicates=[];
-        // Group functions by name
+
+        // Common function names that are expected to be duplicated across files
+        // These are idiomatic patterns, not DRY violations
+        var commonNames=new Set([
+            // React lifecycle and handlers
+            'render','componentDidMount','componentWillUnmount','componentDidUpdate',
+            'shouldComponentUpdate','getDerivedStateFromProps','getSnapshotBeforeUpdate',
+            'handleClick','handleChange','handleSubmit','handleInput','handleKeyDown',
+            'handleKeyUp','handleKeyPress','handleBlur','handleFocus','handleScroll',
+            'handleMouseEnter','handleMouseLeave','handleDrag','handleDrop',
+            'onClick','onChange','onSubmit','onBlur','onFocus','onKeyDown',
+            // Common utility names
+            'init','setup','cleanup','destroy','reset','clear','update','refresh',
+            'validate','parse','format','transform','convert','process','execute',
+            'get','set','fetch','load','save','create','delete','remove','add',
+            'find','filter','map','reduce','sort','merge','clone','copy',
+            // Test patterns
+            'beforeEach','afterEach','beforeAll','afterAll','describe','it','test',
+            'setUp','tearDown','mock',
+            // Common class methods
+            'toString','valueOf','equals','hashCode','compare','clone',
+            'serialize','deserialize','toJSON','fromJSON',
+            // Express/API patterns
+            'index','show','store','update','destroy','create','edit',
+            // Vue lifecycle
+            'mounted','created','updated','destroyed','beforeCreate','beforeMount',
+            // Angular lifecycle
+            'ngOnInit','ngOnDestroy','ngOnChanges','ngAfterViewInit',
+            // Svelte
+            'onMount','onDestroy'
+        ]);
+
+        // Group functions by name (excluding common names)
         var fnByName={};
         allFns.forEach(function(fn){
+            // Skip common/idiomatic names
+            if(commonNames.has(fn.name))return;
+            // Skip very short names (likely false positives)
+            if(fn.name.length<3)return;
+            // Skip class methods (same method name in different classes is normal)
+            if(fn.isClassMethod)return;
+
             if(!fnByName[fn.name])fnByName[fn.name]=[];
             fnByName[fn.name].push(fn);
         });
-        // Find duplicate names across different files
+
+        // Find duplicate names across different files - only report if suspicious
         Object.entries(fnByName).forEach(function(entry){
             var name=entry[0],fns=entry[1];
             var uniqueFiles=[...new Set(fns.map(function(f){return f.file;}))];
-            if(uniqueFiles.length>1){
-                duplicates.push({
-                    type:'name',
-                    name:name,
-                    count:uniqueFiles.length,
-                    files:fns.map(function(f){return{file:f.file,line:f.line};}),
-                    suggestion:'Consider renaming or consolidating "'+name+'" - found in '+uniqueFiles.length+' files'
-                });
-            }
-        });
-        // Find similar code (simple hash-based detection)
-        var codeHashes={};
-        allFns.forEach(function(fn){
-            if(!fn.code||fn.code.length<50)return;
-            // Normalize code: remove whitespace, comments, variable names
-            var normalized=fn.code.replace(/\/\/.*$/gm,'').replace(/\/\*[\s\S]*?\*\//g,'').replace(/\s+/g,' ').replace(/['"`][^'"`]*['"`]/g,'STR').replace(/\b\d+\b/g,'NUM').trim();
-            var hash=normalized.substring(0,200);
-            if(!codeHashes[hash])codeHashes[hash]=[];
-            codeHashes[hash].push(fn);
-        });
-        Object.values(codeHashes).forEach(function(fns){
-            if(fns.length>1){
-                var uniqueFiles=[...new Set(fns.map(function(f){return f.file;}))];
-                if(uniqueFiles.length>1){
-                    duplicates.push({
-                        type:'code',
-                        name:fns.map(function(f){return f.name;}).join(', '),
-                        count:fns.length,
-                        files:fns.map(function(f){return{file:f.file,name:f.name,line:f.line};}),
-                        suggestion:'Similar code detected - consider extracting to a shared utility'
-                    });
+
+            // Only flag if in 3+ files (2 files might be intentional)
+            if(uniqueFiles.length>=3){
+                // Check if the code is actually similar (not just same name)
+                var codeSamples=fns.filter(function(f){return f.code&&f.code.length>30;});
+                if(codeSamples.length>=2){
+                    // Compare first two code samples for similarity
+                    var sim=Parser.codeSimilarity(codeSamples[0].code,codeSamples[1].code);
+                    if(sim>0.5){  // More than 50% similar - likely a real duplicate
+                        duplicates.push({
+                            type:'name',
+                            name:name,
+                            count:uniqueFiles.length,
+                            files:fns.map(function(f){return{file:f.file,line:f.line};}),
+                            similarity:Math.round(sim*100),
+                            suggestion:'Function "'+name+'" appears in '+uniqueFiles.length+' files with '+Math.round(sim*100)+'% similarity - consider consolidating'
+                        });
+                    }
                 }
             }
         });
+
+        // Find similar code blocks (improved algorithm)
+        // Use structural hash that captures the essence of the code
+        var codeGroups={};
+        allFns.forEach(function(fn){
+            if(!fn.code||fn.code.length<80)return;  // Skip very short functions
+
+            // Create a structural fingerprint
+            var fingerprint=Parser.codeFingerprint(fn.code);
+            if(!fingerprint)return;
+
+            if(!codeGroups[fingerprint])codeGroups[fingerprint]=[];
+            codeGroups[fingerprint].push(fn);
+        });
+
+        Object.values(codeGroups).forEach(function(fns){
+            if(fns.length>1){
+                var uniqueFiles=[...new Set(fns.map(function(f){return f.file;}))];
+                // Must be in different files to be a real duplication issue
+                if(uniqueFiles.length>1){
+                    // Verify with actual similarity check
+                    var sim=Parser.codeSimilarity(fns[0].code,fns[1].code);
+                    if(sim>0.7){  // 70% or more similar
+                        duplicates.push({
+                            type:'code',
+                            name:fns.map(function(f){return f.name;}).join(', '),
+                            count:fns.length,
+                            files:fns.map(function(f){return{file:f.file,name:f.name,line:f.line};}),
+                            similarity:Math.round(sim*100),
+                            suggestion:'Similar code blocks ('+Math.round(sim*100)+'% match) - consider extracting to a shared utility'
+                        });
+                    }
+                }
+            }
+        });
+
         return duplicates;
+    },
+
+    // Calculate code similarity using normalized comparison (0-1 scale)
+    codeSimilarity:function(code1,code2){
+        if(!code1||!code2)return 0;
+
+        // Normalize both code blocks
+        function normalize(code){
+            return code
+                .replace(/\/\/.*$/gm,'')           // Remove single-line comments
+                .replace(/\/\*[\s\S]*?\*\//g,'')   // Remove multi-line comments
+                .replace(/['"`][^'"`]*['"`]/g,'S') // Normalize strings
+                .replace(/\b\d+\.?\d*\b/g,'N')     // Normalize numbers
+                .replace(/\s+/g,' ')               // Normalize whitespace
+                .trim();
+        }
+
+        var n1=normalize(code1);
+        var n2=normalize(code2);
+
+        if(n1===n2)return 1;
+        if(n1.length===0||n2.length===0)return 0;
+
+        // Use longest common subsequence ratio
+        var lcs=Parser.lcsLength(n1,n2);
+        var maxLen=Math.max(n1.length,n2.length);
+        return lcs/maxLen;
+    },
+
+    // Longest common subsequence length (optimized for similarity)
+    lcsLength:function(s1,s2){
+        // Use simplified approach for performance
+        if(s1.length>500||s2.length>500){
+            // For long strings, use sampling
+            s1=s1.substring(0,500);
+            s2=s2.substring(0,500);
+        }
+
+        var m=s1.length,n=s2.length;
+        var prev=new Array(n+1).fill(0);
+        var curr=new Array(n+1).fill(0);
+
+        for(var i=1;i<=m;i++){
+            for(var j=1;j<=n;j++){
+                if(s1[i-1]===s2[j-1]){
+                    curr[j]=prev[j-1]+1;
+                }else{
+                    curr[j]=Math.max(prev[j],curr[j-1]);
+                }
+            }
+            var tmp=prev;prev=curr;curr=tmp;
+            curr.fill(0);
+        }
+        return prev[n];
+    },
+
+    // Create a structural fingerprint for code (for grouping similar code)
+    codeFingerprint:function(code){
+        if(!code||code.length<50)return null;
+
+        // Extract structural elements
+        var structure=code
+            .replace(/\/\/.*$/gm,'')           // Remove comments
+            .replace(/\/\*[\s\S]*?\*\//g,'')
+            .replace(/['"`][^'"`]*['"`]/g,'')  // Remove string contents
+            .replace(/\b[a-zA-Z_$][a-zA-Z0-9_$]*\b/g,'I')  // All identifiers -> I
+            .replace(/\b\d+\.?\d*\b/g,'N')     // All numbers -> N
+            .replace(/\s+/g,'');               // Remove whitespace
+
+        // Take a hash-like fingerprint based on structure length and key patterns
+        var patterns={
+            loops:(structure.match(/for|while/g)||[]).length,
+            conditions:(structure.match(/if|\?/g)||[]).length,
+            calls:(structure.match(/I\(/g)||[]).length,
+            returns:(structure.match(/return/g)||[]).length,
+            len:Math.floor(structure.length/50)*50  // Bucket by length
+        };
+
+        // Create fingerprint string
+        return 'L'+patterns.loops+'C'+patterns.conditions+'F'+patterns.calls+'R'+patterns.returns+'S'+patterns.len;
     },
     detectLayerViolations:function(files,connections){
         var violations=[];
@@ -629,39 +773,387 @@ const Parser={
         });
         return issues.sort(function(a,b){var sev={high:0,medium:1,low:2};return sev[a.severity]-sev[b.severity];});
     },
+    // AST-based function extraction - accurate detection without false positives
     extract:function(content,filename){
-        var fns=new Map();
+        var fns=[];
         var lines=content.split('\n');
-        var skip=new Set(['if','for','while','switch','catch','constructor','get','set','new','return','class','import','export','try','else']);
-        function add(name,line){
-            if(name&&name.length>1&&!skip.has(name)&&!fns.has(name)){
-                var code=[],braces=0,started=false;
-                for(var i=Math.max(0,line-1);i<Math.min(lines.length,line+20);i++){
-                    code.push(lines[i]);
-                    for(var j=0;j<lines[i].length;j++){var c=lines[i][j];if(c==='{'){braces++;started=true;}if(c==='}')braces--;}
-                    if(started&&braces<=0&&code.length>1)break;
-                    if(code.length>=15){code.push('  // ...');break;}
+
+        // Helper to extract code snippet for a function
+        function extractCode(startLine,endLine){
+            var code=[];
+            var start=Math.max(0,startLine-1);
+            var end=Math.min(lines.length,endLine||startLine+20);
+            for(var i=start;i<end&&code.length<15;i++){
+                code.push(lines[i]);
+            }
+            if(code.length>=15)code.push('  // ...');
+            return code.join('\n');
+        }
+
+        // Get line number from AST node position
+        function getLine(pos){
+            var line=1;
+            for(var i=0;i<pos&&i<content.length;i++){
+                if(content[i]==='\n')line++;
+            }
+            return line;
+        }
+
+        // Get end line from node
+        function getEndLine(node){
+            if(node.end)return getLine(node.end);
+            return null;
+        }
+
+        // Check if file is JavaScript/TypeScript
+        var ext=filename.toLowerCase();
+        var isJS=ext.endsWith('.js')||ext.endsWith('.jsx')||ext.endsWith('.ts')||ext.endsWith('.tsx')||ext.endsWith('.mjs')||ext.endsWith('.cjs')||ext.endsWith('.vue')||ext.endsWith('.svelte');
+        var isPython=ext.endsWith('.py');
+
+        if(isJS&&typeof acorn!=='undefined'){
+            try{
+                // Strip TypeScript types for parsing (simple approach)
+                var jsContent=content
+                    .replace(/:\s*[A-Za-z_$][\w$<>,\s|&\[\]]*(?=\s*[=,\)\}\];])/g,'')  // Remove type annotations
+                    .replace(/\bas\s+[A-Za-z_$][\w$<>,\s|&\[\]]*(?=\s*[,\)\}\];])/g,'')  // Remove 'as' casts
+                    .replace(/<[A-Za-z_$][\w$<>,\s|&\[\]]*>(?=\s*\()/g,'')  // Remove generic type params before calls
+                    .replace(/^import\s+type\s+.*/gm,'')  // Remove type imports
+                    .replace(/^export\s+type\s+.*/gm,'')  // Remove type exports
+                    .replace(/^export\s+interface\s+.*/gm,'')  // Remove interface exports
+                    .replace(/interface\s+[A-Za-z_$][\w$]*\s*\{[^}]*\}/g,'')  // Remove interfaces
+                    .replace(/type\s+[A-Za-z_$][\w$]*\s*=\s*[^;]+;/g,'');  // Remove type aliases
+
+                var ast=acorn.parse(jsContent,{
+                    ecmaVersion:2022,
+                    sourceType:'module',
+                    allowHashBang:true,
+                    allowAwaitOutsideFunction:true,
+                    allowImportExportEverywhere:true,
+                    locations:true,
+                    tolerant:true
+                });
+
+                var seen=new Set();
+
+                // Walk the AST to find function definitions
+                function walk(node,scope,parentIsExport){
+                    if(!node||typeof node!=='object')return;
+
+                    var isTopLevel=(scope===0);
+
+                    // FunctionDeclaration: function foo() {}
+                    if(node.type==='FunctionDeclaration'&&node.id&&node.id.name){
+                        var name=node.id.name;
+                        if(!seen.has(name)){
+                            seen.add(name);
+                            var line=node.loc?node.loc.start.line:getLine(node.start);
+                            var endLine=node.loc?node.loc.end.line:getEndLine(node);
+                            fns.push({
+                                name:name,
+                                file:filename,
+                                line:line,
+                                code:extractCode(line,endLine),
+                                isTopLevel:isTopLevel,
+                                isExported:parentIsExport||false,
+                                type:'function'
+                            });
+                        }
+                    }
+
+                    // VariableDeclaration with function assignment: const foo = function() {} or const foo = () => {}
+                    if(node.type==='VariableDeclaration'){
+                        node.declarations.forEach(function(decl){
+                            if(decl.id&&decl.id.type==='Identifier'&&decl.init){
+                                var init=decl.init;
+                                // Direct function expression or arrow function
+                                if(init.type==='FunctionExpression'||init.type==='ArrowFunctionExpression'){
+                                    var name=decl.id.name;
+                                    if(!seen.has(name)){
+                                        seen.add(name);
+                                        var line=node.loc?node.loc.start.line:getLine(node.start);
+                                        var endLine=node.loc?node.loc.end.line:getEndLine(node);
+                                        fns.push({
+                                            name:name,
+                                            file:filename,
+                                            line:line,
+                                            code:extractCode(line,endLine),
+                                            isTopLevel:isTopLevel,
+                                            isExported:parentIsExport||false,
+                                            type:init.type==='ArrowFunctionExpression'?'arrow':'function'
+                                        });
+                                    }
+                                }
+                                // NOT a function if it's a method call like array.map(x => x)
+                                // The AST correctly identifies this - init will be CallExpression, not ArrowFunctionExpression
+                            }
+                        });
+                    }
+
+                    // Method definitions in classes
+                    if(node.type==='MethodDefinition'&&node.key){
+                        var name=node.key.name||node.key.value;
+                        if(name&&node.kind!=='get'&&node.kind!=='set'&&name!=='constructor'){
+                            var fullName=name;
+                            if(!seen.has(fullName)){
+                                seen.add(fullName);
+                                var line=node.loc?node.loc.start.line:getLine(node.start);
+                                var endLine=node.loc?node.loc.end.line:getEndLine(node);
+                                fns.push({
+                                    name:fullName,
+                                    file:filename,
+                                    line:line,
+                                    code:extractCode(line,endLine),
+                                    isTopLevel:false,
+                                    isExported:false,
+                                    type:'method',
+                                    isClassMethod:true
+                                });
+                            }
+                        }
+                    }
+
+                    // Object method shorthand in object literals: { foo() {} }
+                    if(node.type==='Property'&&node.method&&node.key){
+                        var name=node.key.name||node.key.value;
+                        if(name&&!seen.has(name)){
+                            seen.add(name);
+                            var line=node.loc?node.loc.start.line:getLine(node.start);
+                            var endLine=node.loc?node.loc.end.line:getEndLine(node);
+                            fns.push({
+                                name:name,
+                                file:filename,
+                                line:line,
+                                code:extractCode(line,endLine),
+                                isTopLevel:false,
+                                isExported:false,
+                                type:'method'
+                            });
+                        }
+                    }
+
+                    // Handle exports
+                    var nextIsExport=false;
+                    if(node.type==='ExportNamedDeclaration'||node.type==='ExportDefaultDeclaration'){
+                        nextIsExport=true;
+                        if(node.declaration){
+                            walk(node.declaration,scope,true);
+                            return;  // Don't double-process
+                        }
+                    }
+
+                    // Recurse into child nodes
+                    var newScope=scope;
+                    if(node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||
+                       node.type==='ArrowFunctionExpression'||node.type==='ClassDeclaration'||
+                       node.type==='ClassExpression'){
+                        newScope=scope+1;
+                    }
+
+                    for(var key in node){
+                        if(key==='loc'||key==='range'||key==='start'||key==='end')continue;
+                        var child=node[key];
+                        if(Array.isArray(child)){
+                            child.forEach(function(c){walk(c,newScope,nextIsExport);});
+                        }else if(child&&typeof child==='object'&&child.type){
+                            walk(child,newScope,nextIsExport);
+                        }
+                    }
                 }
-                fns.set(name,{name:name,file:filename,line:line,code:code.join('\n')});
+
+                walk(ast,0,false);
+
+            }catch(e){
+                // AST parsing failed, fall back to conservative regex for JS
+                // Only match very clear function declarations
+                lines.forEach(function(line,idx){
+                    var m;
+                    // Only match explicit function declarations at start of line
+                    if((m=line.match(/^(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/)))
+                        fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:true,type:'function'});
+                });
+            }
+        }else if(isPython){
+            // Python: use regex for def statements (Python has clear syntax)
+            lines.forEach(function(line,idx){
+                var m=line.match(/^(\s*)def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/);
+                if(m){
+                    var indent=m[1].length;
+                    var name=m[2];
+                    // Find function end by indentation
+                    var endLine=idx+1;
+                    for(var i=idx+1;i<lines.length;i++){
+                        var nextLine=lines[i];
+                        if(nextLine.trim()===''||nextLine.match(/^\s*#/))continue;
+                        var nextIndent=nextLine.match(/^(\s*)/)[1].length;
+                        if(nextIndent<=indent&&nextLine.trim()!==''){endLine=i;break;}
+                        endLine=i+1;
+                    }
+                    fns.push({
+                        name:name,
+                        file:filename,
+                        line:idx+1,
+                        code:extractCode(idx+1,endLine),
+                        isTopLevel:indent===0,
+                        type:'function'
+                    });
+                }
+            });
+        }else{
+            // Other languages: conservative regex approach
+            lines.forEach(function(line,idx){
+                var m;
+                // Go functions
+                if((m=line.match(/^func\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/)))
+                    fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:true,type:'function'});
+                // Java/C#/Kotlin methods (simplified)
+                if((m=line.match(/(?:public|private|protected|static|async|suspend|fun|func)\s+(?:\w+\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/)))
+                    fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:false,type:'method'});
+                // Ruby methods
+                if((m=line.match(/^\s*def\s+([a-zA-Z_][a-zA-Z0-9_?!]*)/)))
+                    fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:true,type:'function'});
+                // Rust functions
+                if((m=line.match(/(?:pub\s+)?fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[<(]/)))
+                    fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:true,type:'function'});
+            });
+        }
+
+        return fns;
+    },
+
+    // AST-based call detection - finds actual function calls and references
+    findCalls:function(content,fnNames,definingFile,fnDefs){
+        var calls={};
+        var refs={};  // Functions used as callbacks/references without ()
+        fnNames.forEach(function(fn){calls[fn]=0;refs[fn]=0;});
+
+        // Build a set of definition lines to exclude
+        var defLines={};
+        if(fnDefs){
+            fnDefs.forEach(function(fn){
+                if(fn.file===definingFile){
+                    defLines[fn.name]=fn.line;
+                }
+            });
+        }
+
+        // Check if this is a JS file
+        var isJS=true;  // Assume JS for content analysis
+
+        if(isJS&&typeof acorn!=='undefined'){
+            try{
+                // Strip TypeScript types for parsing
+                var jsContent=content
+                    .replace(/:\s*[A-Za-z_$][\w$<>,\s|&\[\]]*(?=\s*[=,\)\}\];])/g,'')
+                    .replace(/\bas\s+[A-Za-z_$][\w$<>,\s|&\[\]]*(?=\s*[,\)\}\];])/g,'')
+                    .replace(/<[A-Za-z_$][\w$<>,\s|&\[\]]*>(?=\s*\()/g,'')
+                    .replace(/^import\s+type\s+.*/gm,'')
+                    .replace(/^export\s+type\s+.*/gm,'')
+                    .replace(/^export\s+interface\s+.*/gm,'')
+                    .replace(/interface\s+[A-Za-z_$][\w$]*\s*\{[^}]*\}/g,'')
+                    .replace(/type\s+[A-Za-z_$][\w$]*\s*=\s*[^;]+;/g,'');
+
+                var ast=acorn.parse(jsContent,{
+                    ecmaVersion:2022,
+                    sourceType:'module',
+                    allowHashBang:true,
+                    allowAwaitOutsideFunction:true,
+                    allowImportExportEverywhere:true,
+                    locations:true,
+                    tolerant:true
+                });
+
+                var fnSet=new Set(fnNames);
+
+                function walk(node,inDeclaration){
+                    if(!node||typeof node!=='object')return;
+
+                    // Track if we're in a function declaration to skip counting the name
+                    var isDecl=node.type==='FunctionDeclaration'||node.type==='VariableDeclarator';
+
+                    // CallExpression: foo() or foo.bar()
+                    if(node.type==='CallExpression'){
+                        var callee=node.callee;
+                        if(callee.type==='Identifier'&&fnSet.has(callee.name)){
+                            var line=callee.loc?callee.loc.start.line:0;
+                            // Don't count if this is the definition line
+                            if(!defLines[callee.name]||defLines[callee.name]!==line){
+                                calls[callee.name]++;
+                            }
+                        }
+                        // Also check arguments for function references
+                        node.arguments.forEach(function(arg){
+                            if(arg.type==='Identifier'&&fnSet.has(arg.name)){
+                                refs[arg.name]++;
+                            }
+                        });
+                    }
+
+                    // Function passed as reference (callback): arr.map(fn), addEventListener('click', fn)
+                    if(node.type==='Identifier'&&fnSet.has(node.name)&&!inDeclaration){
+                        // This is handled via parent context - check if parent is not a CallExpression callee
+                        // refs tracking happens in CallExpression arguments above
+                    }
+
+                    // Array element or object property value containing function ref
+                    if(node.type==='ArrayExpression'){
+                        node.elements.forEach(function(el){
+                            if(el&&el.type==='Identifier'&&fnSet.has(el.name)){
+                                refs[el.name]++;
+                            }
+                        });
+                    }
+                    if(node.type==='Property'&&node.value&&node.value.type==='Identifier'&&fnSet.has(node.value.name)){
+                        refs[node.value.name]++;
+                    }
+
+                    // Recurse
+                    for(var key in node){
+                        if(key==='loc'||key==='range'||key==='start'||key==='end')continue;
+                        var child=node[key];
+                        var nextInDecl=isDecl&&(key==='id'||key==='key');
+                        if(Array.isArray(child)){
+                            child.forEach(function(c){walk(c,nextInDecl);});
+                        }else if(child&&typeof child==='object'&&child.type){
+                            walk(child,nextInDecl);
+                        }
+                    }
+                }
+
+                walk(ast,false);
+
+                // Combine calls and refs
+                fnNames.forEach(function(fn){
+                    calls[fn]=calls[fn]+(refs[fn]||0);
+                });
+
+                return calls;
+
+            }catch(e){
+                // Fall back to regex but be more careful
             }
         }
-        lines.forEach(function(line,idx){
-            var m;
-            if((m=line.match(/function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/)))add(m[1],idx+1);
-            if((m=line.match(/(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s*)?\(?[^)]*\)?\s*=>/)))add(m[1],idx+1);
-            if((m=line.match(/(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s*)?function/)))add(m[1],idx+1);
-            if((m=line.match(/^\s*(?:async\s+)?([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)\s*\{/)))add(m[1],idx+1);
-            if((m=line.match(/export\s+(?:default\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/)))add(m[1],idx+1);
-            if((m=line.match(/def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/)))add(m[1],idx+1);
-        });
-        return Array.from(fns.values());
-    },
-    findCalls:function(content,fnNames){
-        var calls={};
+
+        // Fallback: regex-based but more careful
+        // Count actual calls (fn() pattern) and references (fn without parens in specific contexts)
         fnNames.forEach(function(fn){
-            var m=content.match(new RegExp('\\b'+fn+'\\s*\\(','g'));
-            if(m)calls[fn]=m.length;
+            // Count calls: word boundary + name + optional whitespace + (
+            var callPattern=new RegExp('\\b'+fn+'\\s*\\(','g');
+            var m=content.match(callPattern);
+            var callCount=m?m.length:0;
+
+            // Subtract definition (function fn() or const fn =) - these aren't calls
+            var defPattern=new RegExp('(?:function\\s+'+fn+'\\s*\\(|(?:const|let|var)\\s+'+fn+'\\s*=)','g');
+            var defMatch=content.match(defPattern);
+            if(defMatch)callCount-=defMatch.length;
+
+            // Count references (callbacks): , fn) or , fn] or : fn} or [fn,
+            var refPattern=new RegExp('[,\\[:\\(]\\s*'+fn+'\\s*[,\\]\\)\\}]','g');
+            var refMatch=content.match(refPattern);
+            var refCount=refMatch?refMatch.length:0;
+
+            calls[fn]=Math.max(0,callCount)+refCount;
         });
+
         return calls;
     }
 };
@@ -1179,9 +1671,27 @@ function App(){
                 var fnNames=[...new Set(allFns.map(function(f){return f.name;}))];
                 var conns=[];
                 var fnStats={};
-                allFns.forEach(function(fn){if(!fnStats[fn.name])fnStats[fn.name]={internal:0,external:0,callers:new Map(),file:fn.file,folder:fn.folder,line:fn.line,code:fn.code};});
+                // Initialize fnStats with additional metadata for accurate unused detection
+                allFns.forEach(function(fn){
+                    if(!fnStats[fn.name]){
+                        fnStats[fn.name]={
+                            internal:0,
+                            external:0,
+                            callers:new Map(),
+                            file:fn.file,
+                            folder:fn.folder,
+                            line:fn.line,
+                            code:fn.code,
+                            isTopLevel:fn.isTopLevel!==false,  // Default to true for backward compat
+                            isExported:fn.isExported||false,
+                            isClassMethod:fn.isClassMethod||false,
+                            type:fn.type||'function'
+                        };
+                    }
+                });
                 analyzed.forEach(function(file){
-                    var calls=Parser.findCalls(file.content,fnNames);
+                    // Pass file path and all function defs for accurate call detection
+                    var calls=Parser.findCalls(file.content,fnNames,file.path,allFns);
                     Object.entries(calls).forEach(function(entry){
                         var fn=entry[0],cnt=entry[1];
                         var def=fnStats[fn]?fnStats[fn].file:null;
@@ -1199,7 +1709,19 @@ function App(){
                 });
                 Object.values(fnStats).forEach(function(s){s.callers=Array.from(s.callers.values());s.count=s.internal+s.external;});
                 var issues=[];
-                var deadFns=Object.entries(fnStats).filter(function(x){return x[1].internal===0&&x[1].external===0;});
+                // Only flag truly unused functions - must be top-level and have zero calls
+                // Class methods and nested functions are expected to be called via their parent
+                var deadFns=Object.entries(fnStats).filter(function(x){
+                    var stats=x[1];
+                    // Skip if has any calls (internal or external)
+                    if(stats.internal>0||stats.external>0)return false;
+                    // Skip class methods - they're called via instance
+                    if(stats.isClassMethod)return false;
+                    // Skip nested functions - they're private to their scope
+                    if(!stats.isTopLevel)return false;
+                    // This is a top-level function with zero calls - likely dead
+                    return true;
+                });
                 if(deadFns.length)issues.push({type:'warning',title:deadFns.length+' Unused Functions',desc:'Functions not called from other files',items:deadFns.map(function(x){return{name:x[0],file:x[1].file,line:x[1].line,code:x[1].code};})});
                 var godFiles=analyzed.filter(function(f){return f.functions.length>15;});
                 if(godFiles.length)issues.push({type:'critical',title:godFiles.length+' Large Files',desc:'Files with 15+ functions',items:godFiles.map(function(f){return{name:f.name+' ('+f.functions.length+' fns)',file:f.path,fns:f.functions.length,lines:f.lines};})});
