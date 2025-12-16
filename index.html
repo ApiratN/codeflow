@@ -209,8 +209,10 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .toast.error{background:var(--red);color:white}
 .toast.warning{background:var(--orange);color:var(--bg0)}
 @keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
-.reset-btn{background:transparent;border:1px solid var(--border);color:var(--t2);padding:4px 8px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:8px}
+.reset-btn{background:transparent;border:1px solid var(--border);color:var(--t2);padding:4px 8px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:4px}
 .reset-btn:hover{border-color:var(--red);color:var(--red)}
+.refresh-btn{background:transparent;border:1px solid var(--border);color:var(--t2);padding:4px 8px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:8px;display:flex;align-items:center;gap:4px}
+.refresh-btn:hover{border-color:var(--acc);color:var(--acc)}
 .loading-owner{display:flex;align-items:center;gap:8px;padding:12px;color:var(--t2);font-size:10px}
 .loading-owner::before{content:'';width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin 0.6s linear infinite}
 .privacy-modal{max-width:450px}
@@ -609,37 +611,89 @@ function buildTree(files){
 function countFiles(n){return n.files.length+Object.values(n.children).reduce(function(s,c){return s+countFiles(c);},0);}
 
 function calcBlast(fileId,conns,files){
-    // Find files that would break if fileId changes (files that IMPORT from fileId)
-    // Connection format: {source: fileDefiningFn, target: fileCallingFn}
-    // So if fileId is SOURCE, the TARGET depends on it and would be affected
-    var affected=new Set();
-    var queue=[fileId];
-    var visited=new Set([fileId]);
-    var depth=0;
-    var maxDepth=0;
-    while(queue.length>0&&depth<6){
-        var nextQueue=[];
-        queue.forEach(function(cur){
-            conns.forEach(function(c){
-                var src=typeof c.source==='object'?c.source.id:c.source;
-                var tgt=typeof c.target==='object'?c.target.id:c.target;
-                // cur is source (defines fn) -> tgt calls it -> tgt is affected
-                if(src===cur&&!visited.has(tgt)){
-                    affected.add(tgt);
-                    visited.add(tgt);
-                    nextQueue.push(tgt);
-                    maxDepth=depth+1;
-                }
-            });
+    // Comprehensive impact analysis for a file
+    // Connection format: {source: fileDefiningFn, target: fileCallingFn, fn: fnName, count: callCount}
+
+    // Build adjacency lists for fast lookups
+    var exportedTo={};// fileId -> Set of files that import from it
+    var importedFrom={};// fileId -> Set of files it imports from
+    var exportedFns={};// fileId -> Map of fn -> count of external calls
+
+    conns.forEach(function(c){
+        var src=typeof c.source==='object'?c.source.id:c.source;
+        var tgt=typeof c.target==='object'?c.target.id:c.target;
+        // src exports, tgt imports
+        if(!exportedTo[src])exportedTo[src]=new Set();
+        exportedTo[src].add(tgt);
+        if(!importedFrom[tgt])importedFrom[tgt]=new Set();
+        importedFrom[tgt].add(src);
+        if(!exportedFns[src])exportedFns[src]=new Map();
+        var fnMap=exportedFns[src];
+        fnMap.set(c.fn,(fnMap.get(c.fn)||0)+(c.count||1));
+    });
+
+    // 1. Direct dependents (files that directly import from this file)
+    var directDeps=exportedTo[fileId]?Array.from(exportedTo[fileId]):[];
+
+    // 2. Transitive dependents (BFS with depth tracking)
+    var transitive=new Map();// fileId -> depth
+    var queue=directDeps.map(function(f){return{file:f,depth:1};});
+    var visited=new Set([fileId].concat(directDeps));
+    while(queue.length>0){
+        var item=queue.shift();
+        if(item.depth>3)continue;// Limit depth to 3 for transitive
+        transitive.set(item.file,item.depth);
+        var nextDeps=exportedTo[item.file]||new Set();
+        nextDeps.forEach(function(f){
+            if(!visited.has(f)){
+                visited.add(f);
+                queue.push({file:f,depth:item.depth+1});
+            }
         });
-        queue=nextQueue;
-        depth++;
     }
-    var cnt=affected.size;
-    var pct=files.length>0?Math.round(cnt/files.length*100):0;
+
+    // 3. Functions exported (how many of this file's functions are used)
+    var fnUsage=exportedFns[fileId]||new Map();
+    var fnsUsed=fnUsage.size;
+    var totalCalls=0;
+    fnUsage.forEach(function(cnt){totalCalls+=cnt;});
+
+    // 4. Dependencies (files this file imports from - its risk)
+    var dependencies=importedFrom[fileId]?Array.from(importedFrom[fileId]):[];
+
+    // 5. Calculate weighted impact score
+    // Direct deps count fully, transitive count with decay
+    var impactScore=directDeps.length;
+    transitive.forEach(function(depth,f){
+        if(depth>1)impactScore+=1/depth;// 0.5 for depth 2, 0.33 for depth 3
+    });
+
+    // 6. Calculate centrality (how connected is this file)
+    var centrality=directDeps.length+dependencies.length+fnsUsed;
+
+    // Determine level based on direct dependents and functions used
     var level='low';
-    if(pct>40)level='critical';else if(pct>25)level='high';else if(pct>10)level='medium';
-    return{affected:Array.from(affected),count:cnt,percent:pct,level:level,depth:maxDepth};
+    var connectedFiles=files.filter(function(f){return exportedTo[f.path]||importedFrom[f.path];}).length;
+    var relativePct=connectedFiles>0?Math.round(directDeps.length/connectedFiles*100):0;
+
+    if(directDeps.length>=8||fnsUsed>=5)level='critical';
+    else if(directDeps.length>=4||fnsUsed>=3)level='high';
+    else if(directDeps.length>=2||fnsUsed>=1)level='medium';
+
+    return{
+        affected:directDeps,
+        transitive:Array.from(transitive.keys()),
+        count:directDeps.length,
+        transitiveCount:transitive.size,
+        percent:relativePct,
+        level:level,
+        depth:transitive.size>0?Math.max.apply(null,Array.from(transitive.values())):0,
+        fnsUsed:fnsUsed,
+        totalCalls:totalCalls,
+        dependencies:dependencies,
+        impactScore:Math.round(impactScore*10)/10,
+        centrality:centrality
+    };
 }
 
 function calcHealth(data){
@@ -1366,12 +1420,15 @@ function App(){
         var g=svg.append('g').attr('transform','translate(20,20)');
         var zoom=d3.zoom().scaleExtent([0.5,2]).on('zoom',function(e){g.attr('transform','translate('+(20+e.transform.x)+','+(20+e.transform.y)+') scale('+e.transform.k+')');});
         svg.call(zoom);
-        var folders=[...new Set(data.files.map(function(f){return f.folder||'root';}))].slice(0,15);
+        var filteredFiles=folderFilter?data.files.filter(function(f){return f.folder===folderFilter||f.folder.startsWith(folderFilter+'/');}):data.files;
+        var folders=[...new Set(filteredFiles.map(function(f){return f.folder||'root';}))].slice(0,15);
         var folderIdx={};folders.forEach(function(f,i){folderIdx[f]=i;});
+        var filteredPaths=new Set(filteredFiles.map(function(f){return f.path;}));
         var flowMap={};
         data.connections.forEach(function(c){
             var src=typeof c.source==='object'?c.source.id:c.source;
             var tgt=typeof c.target==='object'?c.target.id:c.target;
+            if(!filteredPaths.has(src)&&!filteredPaths.has(tgt))return;
             var srcFile=data.files.find(function(f){return f.path===src;});
             var tgtFile=data.files.find(function(f){return f.path===tgt;});
             if(srcFile&&tgtFile&&srcFile.folder!==tgtFile.folder){
@@ -1379,7 +1436,7 @@ function App(){
                 flowMap[key]=(flowMap[key]||0)+(c.count||1);
             }
         });
-        var nodes=folders.map(function(f,i){return{id:i,name:f.split('/').pop()||'root',fullPath:f,fileCount:data.files.filter(function(x){return x.folder===f;}).length};});
+        var nodes=folders.map(function(f,i){return{id:i,name:f.split('/').pop()||'root',fullPath:f,fileCount:filteredFiles.filter(function(x){return x.folder===f;}).length};});
         // Merge bidirectional flows to avoid circular link errors
         var linkMap={};
         Object.entries(flowMap).forEach(function(e){
@@ -1427,7 +1484,7 @@ function App(){
             g.selectAll('path.sankey-link').attr('stroke-opacity',function(l){return l.source.id===d.id||l.target.id===d.id?0.8:0.1;});
         }).on('mouseleave',function(){tooltip.style('display','none');g.selectAll('path.sankey-link').attr('stroke-opacity',0.4);})
         .on('click',function(e,d){e.stopPropagation();filterByFolder(d.fullPath);});
-    },[data,graphConfig.vizType,colorMap]);
+    },[data,graphConfig.vizType,colorMap,folderFilter]);
 
     // Disjoint Force-Directed - Separate clusters per folder
     useEffect(function(){
@@ -1807,7 +1864,7 @@ function App(){
                 React.createElement('input',{className:'repo-input','aria-label':'Repository URL',placeholder:'owner/repo or GitHub URL',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
                 React.createElement('input',{className:'repo-input',type:'password','aria-label':'GitHub Token',placeholder:'Token (optional)',value:token,onChange:function(e){setToken(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();},style:{maxWidth:120}}),
                 React.createElement('button',{id:'analyze-btn',className:'top-btn primary','aria-label':'Analyze repository',onClick:analyze,disabled:loading||!repoUrl},loading?'⏳':'🔍',' Analyze'),
-                data&&React.createElement('button',{className:'top-btn','aria-label':'Refresh analysis',onClick:analyze,disabled:loading,title:'Refresh Analysis'},'🔄'),
+                data&&React.createElement('button',{className:'refresh-btn','aria-label':'Refresh analysis',onClick:analyze,disabled:loading,title:'Refresh Analysis'},'↻ Refresh'),
                 data&&React.createElement('button',{className:'reset-btn','aria-label':'Reset analysis',onClick:resetAnalysis,title:'Clear & Reset'},'✕ Reset')
             ),
             React.createElement('div',{className:'topbar-actions'},
@@ -1934,7 +1991,7 @@ function App(){
                     React.createElement('div',{className:'canvas-info'},
                         React.createElement('div',{className:'info-chip'},React.createElement('strong',null,folderFilter?data.files.filter(function(f){return f.folder===folderFilter||f.folder.startsWith(folderFilter+'/');}).length:data.files.length),' files'),
                         React.createElement('div',{className:'info-chip'},React.createElement('strong',null,data.connections.length),' links'),
-                        selected&&blastRadius&&React.createElement('div',{className:'info-chip'},'💥 ',React.createElement('strong',null,blastRadius.count),' affected')
+                        selected&&blastRadius&&React.createElement('div',{className:'info-chip'},'💥 ',React.createElement('strong',null,blastRadius.count),' dependents',blastRadius.fnsUsed>0?' • '+blastRadius.fnsUsed+' fns used':'')
                     ),
                     React.createElement('div',{className:'legend'+(legendCollapsed?' collapsed':'')},
                         React.createElement('div',{className:'legend-header',onClick:function(){setLegendCollapsed(!legendCollapsed);}},
@@ -1970,14 +2027,40 @@ function App(){
                             React.createElement('button',{className:'top-btn',style:{width:'100%',marginBottom:12},onClick:function(){setSelected(null);setBlastRadius(null);if(nodesRef.current){nodesRef.current.selectAll('.nc').transition().duration(200).attr('opacity',1).attr('fill',getNodeColor);}if(linksRef.current){linksRef.current.transition().duration(200).attr('stroke-opacity',0.4).attr('stroke',theme==='light'?'#ccc':'#333');}}},'← Back to Issues'),
                             React.createElement('div',{className:'panel-header',style:{margin:'-12px -12px 12px',padding:12}},React.createElement('div',{className:'panel-title'},'📄 ',selected.name),React.createElement('div',{className:'panel-subtitle'},selected.folder||'root',' • ',selected.layer,' • ',selected.lines,' lines')),
                             blastRadius&&React.createElement('div',{className:'card',style:{marginBottom:12}},
-                                React.createElement('div',{className:'card-header',onClick:function(){toggleCard('blast');}},React.createElement('div',{className:'card-title'},React.createElement('span',{className:'card-toggle'+(expandedCards.has('blast')?' open':'')},'▶'),'💥 Blast Radius'),React.createElement('span',{className:'badge badge-'+(blastRadius.level==='low'?'success':blastRadius.level==='medium'?'warning':'danger')},blastRadius.level.toUpperCase())),
+                                React.createElement('div',{className:'card-header',onClick:function(){toggleCard('blast');}},React.createElement('div',{className:'card-title'},React.createElement('span',{className:'card-toggle'+(expandedCards.has('blast')?' open':'')},'▶'),'💥 Impact Analysis'),React.createElement('span',{className:'badge badge-'+(blastRadius.level==='low'?'success':blastRadius.level==='medium'?'warning':'danger')},blastRadius.level.toUpperCase())),
                                 expandedCards.has('blast')&&React.createElement('div',{className:'card-body'},
-                                    React.createElement('div',{style:{marginBottom:8}},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:4}},React.createElement('span',null,'Impact'),React.createElement('span',null,blastRadius.count,' files (',blastRadius.percent,'%)')),React.createElement('div',{className:'progress-bar'},React.createElement('div',{className:'progress-fill',style:{width:Math.min(100,blastRadius.percent)+'%',background:blastRadius.level==='low'?'var(--green)':blastRadius.level==='medium'?'var(--orange)':'var(--red)'}}))),
-                                    React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginBottom:8}},'Changes to this file propagate up to ',blastRadius.depth,' levels deep'),
+                                    React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}},
+                                        React.createElement('div',{style:{background:'var(--bg0)',padding:8,borderRadius:6,textAlign:'center'}},
+                                            React.createElement('div',{style:{fontSize:16,fontWeight:600,color:'var(--acc)'}},blastRadius.count),
+                                            React.createElement('div',{style:{fontSize:9,color:'var(--t3)'}},'Direct Dependents')
+                                        ),
+                                        React.createElement('div',{style:{background:'var(--bg0)',padding:8,borderRadius:6,textAlign:'center'}},
+                                            React.createElement('div',{style:{fontSize:16,fontWeight:600,color:'var(--purple)'}},blastRadius.transitiveCount||0),
+                                            React.createElement('div',{style:{fontSize:9,color:'var(--t3)'}},'Transitive')
+                                        ),
+                                        React.createElement('div',{style:{background:'var(--bg0)',padding:8,borderRadius:6,textAlign:'center'}},
+                                            React.createElement('div',{style:{fontSize:16,fontWeight:600,color:'var(--green)'}},blastRadius.fnsUsed||0),
+                                            React.createElement('div',{style:{fontSize:9,color:'var(--t3)'}},'Fns Exported')
+                                        ),
+                                        React.createElement('div',{style:{background:'var(--bg0)',padding:8,borderRadius:6,textAlign:'center'}},
+                                            React.createElement('div',{style:{fontSize:16,fontWeight:600,color:'var(--orange)'}},(blastRadius.dependencies||[]).length),
+                                            React.createElement('div',{style:{fontSize:9,color:'var(--t3)'}},'Dependencies')
+                                        )
+                                    ),
+                                    (blastRadius.count>0||blastRadius.fnsUsed>0)&&React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginBottom:8,padding:'6px 8px',background:'var(--bg0)',borderRadius:4}},
+                                        blastRadius.count>0?'⚡ '+blastRadius.count+' file'+(blastRadius.count>1?'s':'')+' directly depend on this file':'',
+                                        blastRadius.count>0&&blastRadius.fnsUsed>0?' • ':'',
+                                        blastRadius.fnsUsed>0?blastRadius.fnsUsed+' function'+(blastRadius.fnsUsed>1?'s':'')+' used '+blastRadius.totalCalls+' times':''
+                                    ),
                                     blastRadius.affected.length>0&&React.createElement('div',{className:'blast-detail'},
-                                        React.createElement('div',{style:{fontSize:9,fontWeight:600,marginBottom:6}},'Affected Files:'),
-                                        blastRadius.affected.slice(0,10).map(function(path){return React.createElement('div',{key:path,className:'blast-file',onClick:function(){selectFile(path);}},'📄 ',path.split('/').pop());}),
-                                        blastRadius.affected.length>10&&React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginTop:4}},'+',blastRadius.affected.length-10,' more files')
+                                        React.createElement('div',{style:{fontSize:9,fontWeight:600,marginBottom:6}},'Files that import from this:'),
+                                        blastRadius.affected.slice(0,8).map(function(path){return React.createElement('div',{key:path,className:'blast-file',onClick:function(){selectFile(path);}},'📄 ',path.split('/').pop());}),
+                                        blastRadius.affected.length>8&&React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginTop:4}},'+',blastRadius.affected.length-8,' more')
+                                    ),
+                                    (blastRadius.dependencies||[]).length>0&&React.createElement('div',{className:'blast-detail',style:{marginTop:8}},
+                                        React.createElement('div',{style:{fontSize:9,fontWeight:600,marginBottom:6,color:'var(--orange)'}},'Dependencies (risk if these change):'),
+                                        blastRadius.dependencies.slice(0,5).map(function(path){return React.createElement('div',{key:path,className:'blast-file',onClick:function(){selectFile(path);}},'📄 ',path.split('/').pop());}),
+                                        blastRadius.dependencies.length>5&&React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginTop:4}},'+',blastRadius.dependencies.length-5,' more')
                                     )
                                 )
                             ),
