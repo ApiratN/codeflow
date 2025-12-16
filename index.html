@@ -790,52 +790,69 @@ const Parser={
             return code.join('\n');
         }
 
-        // Get line number from AST node position
-        function getLine(pos){
-            var line=1;
-            for(var i=0;i<pos&&i<content.length;i++){
-                if(content[i]==='\n')line++;
+        // Track functions by line to allow same name at different locations
+        var seenAtLine={};
+        function addFn(fnObj){
+            var key=fnObj.name+'@'+fnObj.line;
+            if(!seenAtLine[key]){
+                seenAtLine[key]=true;
+                fns.push(fnObj);
             }
-            return line;
         }
 
-        // Get end line from node
-        function getEndLine(node){
-            if(node.end)return getLine(node.end);
-            return null;
-        }
-
-        // Check if file is JavaScript/TypeScript
+        // Check file type
         var ext=filename.toLowerCase();
-        var isJS=ext.endsWith('.js')||ext.endsWith('.jsx')||ext.endsWith('.ts')||ext.endsWith('.tsx')||ext.endsWith('.mjs')||ext.endsWith('.cjs')||ext.endsWith('.vue')||ext.endsWith('.svelte');
+        var isJS=ext.endsWith('.js')||ext.endsWith('.jsx')||ext.endsWith('.mjs')||ext.endsWith('.cjs');
+        var isTS=ext.endsWith('.ts')||ext.endsWith('.tsx');
+        var isVue=ext.endsWith('.vue');
+        var isSvelte=ext.endsWith('.svelte');
         var isPython=ext.endsWith('.py');
 
-        if(isJS&&typeof acorn!=='undefined'){
-            try{
-                // Strip TypeScript types for parsing (simple approach)
-                var jsContent=content
-                    .replace(/:\s*[A-Za-z_$][\w$<>,\s|&\[\]]*(?=\s*[=,\)\}\];])/g,'')  // Remove type annotations
-                    .replace(/\bas\s+[A-Za-z_$][\w$<>,\s|&\[\]]*(?=\s*[,\)\}\];])/g,'')  // Remove 'as' casts
-                    .replace(/<[A-Za-z_$][\w$<>,\s|&\[\]]*>(?=\s*\()/g,'')  // Remove generic type params before calls
-                    .replace(/^import\s+type\s+.*/gm,'')  // Remove type imports
-                    .replace(/^export\s+type\s+.*/gm,'')  // Remove type exports
-                    .replace(/^export\s+interface\s+.*/gm,'')  // Remove interface exports
-                    .replace(/interface\s+[A-Za-z_$][\w$]*\s*\{[^}]*\}/g,'')  // Remove interfaces
-                    .replace(/type\s+[A-Za-z_$][\w$]*\s*=\s*[^;]+;/g,'');  // Remove type aliases
+        // Extract script content from Vue/Svelte files
+        var scriptContent=content;
+        var scriptOffset=0;
+        if(isVue||isSvelte){
+            var scriptMatch=content.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+            if(scriptMatch){
+                scriptContent=scriptMatch[1];
+                scriptOffset=content.substring(0,content.indexOf(scriptMatch[1])).split('\n').length-1;
+                isJS=true;  // Treat extracted script as JS
+                // Check if it's TypeScript
+                if(content.match(/<script[^>]*lang=["']ts["'][^>]*>/i)){
+                    isTS=true;
+                    isJS=false;
+                }
+            }else{
+                // No script tag found
+                return fns;
+            }
+            lines=scriptContent.split('\n');
+        }
 
-                var ast=acorn.parse(jsContent,{
+        // Try AST parsing for JS/TS files
+        if((isJS||isTS)&&typeof acorn!=='undefined'){
+            var parseContent=scriptContent;
+            var parseSuccess=false;
+
+            // For TypeScript, strip types first
+            if(isTS){
+                parseContent=Parser.stripTypeScript(scriptContent);
+            }
+
+            // Try parsing
+            try{
+                var ast=acorn.parse(parseContent,{
                     ecmaVersion:2022,
                     sourceType:'module',
                     allowHashBang:true,
                     allowAwaitOutsideFunction:true,
                     allowImportExportEverywhere:true,
-                    locations:true,
-                    tolerant:true
+                    allowReturnOutsideFunction:true,
+                    locations:true
                 });
+                parseSuccess=true;
 
-                var seen=new Set();
-
-                // Walk the AST to find function definitions
+                // Walk the AST to find ALL function definitions
                 function walk(node,scope,parentIsExport){
                     if(!node||typeof node!=='object')return;
 
@@ -843,83 +860,71 @@ const Parser={
 
                     // FunctionDeclaration: function foo() {}
                     if(node.type==='FunctionDeclaration'&&node.id&&node.id.name){
-                        var name=node.id.name;
-                        if(!seen.has(name)){
-                            seen.add(name);
-                            var line=node.loc?node.loc.start.line:getLine(node.start);
-                            var endLine=node.loc?node.loc.end.line:getEndLine(node);
-                            fns.push({
-                                name:name,
-                                file:filename,
-                                line:line,
-                                code:extractCode(line,endLine),
-                                isTopLevel:isTopLevel,
-                                isExported:parentIsExport||false,
-                                type:'function'
-                            });
-                        }
+                        var line=(node.loc?node.loc.start.line:1)+scriptOffset;
+                        var endLine=(node.loc?node.loc.end.line:line)+scriptOffset;
+                        addFn({
+                            name:node.id.name,
+                            file:filename,
+                            line:line,
+                            code:extractCode(line,endLine),
+                            isTopLevel:isTopLevel,
+                            isExported:parentIsExport||false,
+                            type:'function'
+                        });
                     }
 
-                    // VariableDeclaration with function assignment: const foo = function() {} or const foo = () => {}
+                    // VariableDeclaration: const foo = () => {} or const foo = function() {}
                     if(node.type==='VariableDeclaration'){
                         node.declarations.forEach(function(decl){
                             if(decl.id&&decl.id.type==='Identifier'&&decl.init){
                                 var init=decl.init;
-                                // Direct function expression or arrow function
+                                // Direct function expression or arrow function ONLY
+                                // NOT CallExpression (e.g., array.map(x => x))
                                 if(init.type==='FunctionExpression'||init.type==='ArrowFunctionExpression'){
-                                    var name=decl.id.name;
-                                    if(!seen.has(name)){
-                                        seen.add(name);
-                                        var line=node.loc?node.loc.start.line:getLine(node.start);
-                                        var endLine=node.loc?node.loc.end.line:getEndLine(node);
-                                        fns.push({
-                                            name:name,
-                                            file:filename,
-                                            line:line,
-                                            code:extractCode(line,endLine),
-                                            isTopLevel:isTopLevel,
-                                            isExported:parentIsExport||false,
-                                            type:init.type==='ArrowFunctionExpression'?'arrow':'function'
-                                        });
-                                    }
+                                    var line=(decl.loc?decl.loc.start.line:1)+scriptOffset;
+                                    var endLine=(decl.loc?decl.loc.end.line:line)+scriptOffset;
+                                    addFn({
+                                        name:decl.id.name,
+                                        file:filename,
+                                        line:line,
+                                        code:extractCode(line,endLine),
+                                        isTopLevel:isTopLevel,
+                                        isExported:parentIsExport||false,
+                                        type:init.type==='ArrowFunctionExpression'?'arrow':'function'
+                                    });
                                 }
-                                // NOT a function if it's a method call like array.map(x => x)
-                                // The AST correctly identifies this - init will be CallExpression, not ArrowFunctionExpression
                             }
                         });
                     }
 
-                    // Method definitions in classes
+                    // MethodDefinition in classes
                     if(node.type==='MethodDefinition'&&node.key){
                         var name=node.key.name||node.key.value;
-                        if(name&&node.kind!=='get'&&node.kind!=='set'&&name!=='constructor'){
-                            var fullName=name;
-                            if(!seen.has(fullName)){
-                                seen.add(fullName);
-                                var line=node.loc?node.loc.start.line:getLine(node.start);
-                                var endLine=node.loc?node.loc.end.line:getEndLine(node);
-                                fns.push({
-                                    name:fullName,
-                                    file:filename,
-                                    line:line,
-                                    code:extractCode(line,endLine),
-                                    isTopLevel:false,
-                                    isExported:false,
-                                    type:'method',
-                                    isClassMethod:true
-                                });
-                            }
+                        if(name&&name!=='constructor'){
+                            var line=(node.loc?node.loc.start.line:1)+scriptOffset;
+                            var endLine=(node.loc?node.loc.end.line:line)+scriptOffset;
+                            addFn({
+                                name:name,
+                                file:filename,
+                                line:line,
+                                code:extractCode(line,endLine),
+                                isTopLevel:false,
+                                isExported:false,
+                                type:'method',
+                                isClassMethod:true,
+                                isGetter:node.kind==='get',
+                                isSetter:node.kind==='set'
+                            });
                         }
                     }
 
-                    // Object method shorthand in object literals: { foo() {} }
+                    // Property with method shorthand: { foo() {} }
                     if(node.type==='Property'&&node.method&&node.key){
                         var name=node.key.name||node.key.value;
-                        if(name&&!seen.has(name)){
-                            seen.add(name);
-                            var line=node.loc?node.loc.start.line:getLine(node.start);
-                            var endLine=node.loc?node.loc.end.line:getEndLine(node);
-                            fns.push({
+                        if(name){
+                            var line=(node.loc?node.loc.start.line:1)+scriptOffset;
+                            var endLine=(node.loc?node.loc.end.line:line)+scriptOffset;
+                            addFn({
                                 name:name,
                                 file:filename,
                                 line:line,
@@ -931,17 +936,38 @@ const Parser={
                         }
                     }
 
+                    // Property with function value: { foo: function() {} } or { foo: () => {} }
+                    if(node.type==='Property'&&!node.method&&node.value&&node.key){
+                        var val=node.value;
+                        if(val.type==='FunctionExpression'||val.type==='ArrowFunctionExpression'){
+                            var name=node.key.name||node.key.value;
+                            if(name){
+                                var line=(node.loc?node.loc.start.line:1)+scriptOffset;
+                                var endLine=(node.loc?node.loc.end.line:line)+scriptOffset;
+                                addFn({
+                                    name:name,
+                                    file:filename,
+                                    line:line,
+                                    code:extractCode(line,endLine),
+                                    isTopLevel:false,
+                                    isExported:false,
+                                    type:'method'
+                                });
+                            }
+                        }
+                    }
+
                     // Handle exports
                     var nextIsExport=false;
                     if(node.type==='ExportNamedDeclaration'||node.type==='ExportDefaultDeclaration'){
                         nextIsExport=true;
                         if(node.declaration){
                             walk(node.declaration,scope,true);
-                            return;  // Don't double-process
+                            return;
                         }
                     }
 
-                    // Recurse into child nodes
+                    // Recurse - increase scope for function bodies
                     var newScope=scope;
                     if(node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||
                        node.type==='ArrowFunctionExpression'||node.type==='ClassDeclaration'||
@@ -950,7 +976,7 @@ const Parser={
                     }
 
                     for(var key in node){
-                        if(key==='loc'||key==='range'||key==='start'||key==='end')continue;
+                        if(key==='loc'||key==='range'||key==='start'||key==='end'||key==='raw')continue;
                         var child=node[key];
                         if(Array.isArray(child)){
                             child.forEach(function(c){walk(c,newScope,nextIsExport);});
@@ -963,32 +989,30 @@ const Parser={
                 walk(ast,0,false);
 
             }catch(e){
-                // AST parsing failed, fall back to conservative regex for JS
-                // Only match very clear function declarations
-                lines.forEach(function(line,idx){
-                    var m;
-                    // Only match explicit function declarations at start of line
-                    if((m=line.match(/^(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/)))
-                        fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:true,type:'function'});
-                });
+                // AST parsing failed
+                parseSuccess=false;
+            }
+
+            // If AST parsing failed, use comprehensive regex fallback
+            if(!parseSuccess){
+                Parser.extractWithRegex(scriptContent,filename,scriptOffset,addFn,extractCode);
             }
         }else if(isPython){
-            // Python: use regex for def statements (Python has clear syntax)
+            // Python: use regex for def statements
             lines.forEach(function(line,idx){
                 var m=line.match(/^(\s*)def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/);
                 if(m){
                     var indent=m[1].length;
                     var name=m[2];
-                    // Find function end by indentation
                     var endLine=idx+1;
                     for(var i=idx+1;i<lines.length;i++){
                         var nextLine=lines[i];
                         if(nextLine.trim()===''||nextLine.match(/^\s*#/))continue;
-                        var nextIndent=nextLine.match(/^(\s*)/)[1].length;
+                        var nextIndent=(nextLine.match(/^(\s*)/)||['',''])[1].length;
                         if(nextIndent<=indent&&nextLine.trim()!==''){endLine=i;break;}
                         endLine=i+1;
                     }
-                    fns.push({
+                    addFn({
                         name:name,
                         file:filename,
                         line:idx+1,
@@ -999,25 +1023,165 @@ const Parser={
                 }
             });
         }else{
-            // Other languages: conservative regex approach
-            lines.forEach(function(line,idx){
-                var m;
-                // Go functions
-                if((m=line.match(/^func\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/)))
-                    fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:true,type:'function'});
-                // Java/C#/Kotlin methods (simplified)
-                if((m=line.match(/(?:public|private|protected|static|async|suspend|fun|func)\s+(?:\w+\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/)))
-                    fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:false,type:'method'});
-                // Ruby methods
-                if((m=line.match(/^\s*def\s+([a-zA-Z_][a-zA-Z0-9_?!]*)/)))
-                    fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:true,type:'function'});
-                // Rust functions
-                if((m=line.match(/(?:pub\s+)?fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[<(]/)))
-                    fns.push({name:m[1],file:filename,line:idx+1,code:extractCode(idx+1),isTopLevel:true,type:'function'});
-            });
+            // Other languages: use language-specific regex
+            Parser.extractOtherLanguages(content,filename,addFn,extractCode);
         }
 
         return fns;
+    },
+
+    // Strip TypeScript syntax for Acorn parsing
+    stripTypeScript:function(content){
+        // Process line by line for more control
+        var lines=content.split('\n');
+        var result=[];
+        var inInterface=false;
+        var braceDepth=0;
+
+        for(var i=0;i<lines.length;i++){
+            var line=lines[i];
+
+            // Skip type-only imports/exports
+            if(line.match(/^\s*import\s+type\s/)||line.match(/^\s*export\s+type\s/)){
+                result.push('');
+                continue;
+            }
+
+            // Track interface/type blocks to skip
+            if(line.match(/^\s*(?:export\s+)?interface\s+/)||line.match(/^\s*(?:export\s+)?type\s+\w+\s*=/)){
+                inInterface=true;
+                braceDepth=0;
+            }
+
+            if(inInterface){
+                for(var j=0;j<line.length;j++){
+                    if(line[j]==='{')braceDepth++;
+                    if(line[j]==='}')braceDepth--;
+                }
+                if(braceDepth<=0&&(line.includes('}')||line.includes(';')||!line.match(/[{;]/))){
+                    inInterface=false;
+                }
+                result.push('');
+                continue;
+            }
+
+            // Remove type annotations carefully
+            // Function params: (x: Type) -> (x)
+            line=line.replace(/(\w)\s*:\s*[A-Za-z_$<>[\]|&\s,]+(?=[,\)])/g,'$1');
+            // Return types: ): Type => -> ) =>  or ): Type { -> ) {
+            line=line.replace(/\)\s*:\s*[A-Za-z_$<>[\]|&\s]+(?=\s*[{=>])/g,')');
+            // Variable types: let x: Type = -> let x =
+            line=line.replace(/(let|const|var)\s+(\w+)\s*:\s*[A-Za-z_$<>[\]|&\s]+\s*=/g,'$1 $2 =');
+            // Generic type params: func<T>( -> func(
+            line=line.replace(/<[A-Za-z_$,\s]+>(?=\s*\()/g,'');
+            // As casts: x as Type -> x
+            line=line.replace(/\s+as\s+[A-Za-z_$<>[\]|&\s]+(?=[,;\)\]\}]|$)/g,'');
+            // Non-null assertions: x! -> x
+            line=line.replace(/!(?=[\.\[\)\],;\s])/g,'');
+            // Declare statements
+            if(line.match(/^\s*declare\s+/)){
+                result.push('');
+                continue;
+            }
+
+            result.push(line);
+        }
+
+        return result.join('\n');
+    },
+
+    // Comprehensive regex fallback for JS/TS when AST fails
+    extractWithRegex:function(content,filename,offset,addFn,extractCode){
+        var lines=content.split('\n');
+
+        lines.forEach(function(line,idx){
+            var lineNum=idx+1+offset;
+            var m;
+
+            // Named function declarations
+            if((m=line.match(/(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // Arrow functions assigned to const/let/var at START of meaningful content
+            // Must have = directly followed by arrow function pattern
+            if((m=line.match(/(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'arrow'});
+
+            // Arrow functions with single param (no parens): const foo = x =>
+            if((m=line.match(/(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'arrow'});
+
+            // Function expressions: const foo = function
+            if((m=line.match(/(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?function\s*[(\w]/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // Class methods (inside class body): methodName() { or async methodName() {
+            if((m=line.match(/^\s+(?:async\s+)?([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)\s*\{/))&&!line.match(/^s*(if|for|while|switch|catch|function|const|let|var)/))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:false,type:'method',isClassMethod:true});
+
+            // Object method shorthand (indented): foo() { or foo: function
+            if((m=line.match(/^\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*(?:async\s+)?function/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:false,type:'method'});
+
+            // Object property arrow: foo: () =>
+            if((m=line.match(/^\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*(?:async\s*)?\([^)]*\)\s*=>/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:false,type:'method'});
+        });
+    },
+
+    // Extract functions from other languages
+    extractOtherLanguages:function(content,filename,addFn,extractCode){
+        var lines=content.split('\n');
+
+        lines.forEach(function(line,idx){
+            var lineNum=idx+1;
+            var m;
+
+            // Go: func name(
+            if((m=line.match(/^func\s+(?:\([^)]+\)\s*)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // Java/C#/Kotlin: public void methodName( or similar
+            if((m=line.match(/(?:public|private|protected|internal|static|final|override|virtual|abstract|async)\s+(?:(?:static|final|override|virtual|abstract|async)\s+)*(?:\w+\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:false,type:'method'});
+
+            // Kotlin: fun name(
+            if((m=line.match(/(?:suspend\s+)?fun\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[<(]/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // Ruby: def name
+            if((m=line.match(/^\s*def\s+([a-zA-Z_][a-zA-Z0-9_?!]*)/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // Rust: fn name or pub fn name
+            if((m=line.match(/(?:pub\s+)?(?:async\s+)?fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[<(]/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // PHP: function name( or public function name(
+            if((m=line.match(/(?:public|private|protected|static)?\s*function\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // C/C++: type name( at start or with visibility
+            if((m=line.match(/^(?:static\s+)?(?:inline\s+)?(?:virtual\s+)?(?:\w+\s+)+([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^;]*$/)))
+                if(!line.match(/^\s*(if|for|while|switch|return|sizeof|typeof)/))
+                    addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // Swift: func name
+            if((m=line.match(/(?:public|private|internal|fileprivate|open)?\s*(?:static\s+)?(?:class\s+)?func\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[<(]/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // Scala: def name
+            if((m=line.match(/\bdef\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[(\[]/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // Elixir: def name or defp name
+            if((m=line.match(/\bdefp?\s+([a-zA-Z_][a-zA-Z0-9_?!]*)/)))
+                addFn({name:m[1],file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+
+            // Lua: function name( or local function name(
+            if((m=line.match(/(?:local\s+)?function\s+([a-zA-Z_][a-zA-Z0-9_.:]*)\s*\(/)))
+                addFn({name:m[1].split(/[.:]/).pop(),file:filename,line:lineNum,code:extractCode(lineNum),isTopLevel:true,type:'function'});
+        });
     },
 
     // AST-based call detection - finds actual function calls and references
