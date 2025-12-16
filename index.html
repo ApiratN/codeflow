@@ -991,6 +991,7 @@ function App(){
     var _k=useState(new Set([''])),expandedPaths=_k[0],setExpandedPaths=_k[1];
     var _l=useState(new Set(['blast','fns'])),expandedCards=_l[0],setExpandedCards=_l[1];
     var _m=useState('details'),rightTab=_m[0],setRightTab=_m[1];
+    var _m2=useState(null),drillDown=_m2[0],setDrillDown=_m2[1];// {type:'issue'|'pattern'|'security'|'suggestion'|'duplicate', data:...}
     var _n=useState(null),blastRadius=_n[0],setBlastRadius=_n[1];
     var _o=useState(null),ownership=_o[0],setOwnership=_o[1];
     var _p=useState(''),prUrl=_p[0],setPrUrl=_p[1];
@@ -2170,10 +2171,10 @@ function App(){
                 }}),
                 data?React.createElement(React.Fragment,null,
                     React.createElement('div',{className:'panel-tabs'},
-                        React.createElement('button',{className:'panel-tab'+(rightTab==='details'?' active':''),onClick:function(){setRightTab('details');}},selected?'📄 FILE':'🔍 ISSUES'),
-                        React.createElement('button',{className:'panel-tab'+(rightTab==='patterns'?' active':''),onClick:function(){setRightTab('patterns');}},'🧩 PATTERNS ',React.createElement('span',{className:'badge badge-default'},data.patterns.length)),
-                        React.createElement('button',{className:'panel-tab'+(rightTab==='security'?' active':''),onClick:function(){setRightTab('security');}},'🔐 SECURITY',data.stats.security>0&&React.createElement('span',{className:'view-mode-badge',style:{marginLeft:4}},data.stats.security)),
-                        React.createElement('button',{className:'panel-tab'+(rightTab==='suggestions'?' active':''),onClick:function(){setRightTab('suggestions');}},'💡 ACTIONS',data.suggestions&&data.suggestions.length>0&&React.createElement('span',{className:'view-mode-badge',style:{marginLeft:4}},data.suggestions.length))
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='details'?' active':''),onClick:function(){setRightTab('details');setDrillDown(null);}},selected?'📄 FILE':'🔍 ISSUES'),
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='patterns'?' active':''),onClick:function(){setRightTab('patterns');setDrillDown(null);}},'🧩 PATTERNS ',React.createElement('span',{className:'badge badge-default'},data.patterns.length)),
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='security'?' active':''),onClick:function(){setRightTab('security');setDrillDown(null);}},'🔐 SECURITY',data.stats.security>0&&React.createElement('span',{className:'view-mode-badge',style:{marginLeft:4}},data.stats.security)),
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='suggestions'?' active':''),onClick:function(){setRightTab('suggestions');setDrillDown(null);}},'💡 ACTIONS',data.suggestions&&data.suggestions.length>0&&React.createElement('span',{className:'view-mode-badge',style:{marginLeft:4}},data.suggestions.length))
                     ),
                     React.createElement('div',{className:'panel-content'},
                         rightTab==='details'&&(selected?React.createElement(React.Fragment,null,
@@ -2332,32 +2333,26 @@ function App(){
                         ):React.createElement(React.Fragment,null,
                             React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'🔍 Architecture Issues (',data.issues.length,')'),
                             data.issues.length===0?React.createElement('div',{style:{textAlign:'center',padding:20}},React.createElement('div',{style:{fontSize:32,marginBottom:8}},'✨'),React.createElement('div',{style:{color:'var(--green)'}},'No issues detected!')):
-                            data.issues.map(function(issue,i){return React.createElement('div',{key:i,className:'security-item '+(issue.type==='critical'?'high':'medium')},
+                            data.issues.map(function(issue,i){return React.createElement('div',{key:i,className:'security-item '+(issue.type==='critical'?'high':'medium'),style:{cursor:'pointer'},onClick:function(){setDrillDown({type:'issue',data:issue});}},
                                 React.createElement('div',{className:'security-header'},
                                     React.createElement('span',null,issue.type==='critical'?'🔴':'🟡'),
                                     React.createElement('span',{className:'security-title'},issue.title)
                                 ),
                                 React.createElement('div',{className:'security-desc'},issue.desc),
-                                issue.items&&issue.items.slice(0,5).map(function(item,j){return React.createElement('div',{key:j,className:'security-path',style:{cursor:'pointer'},onClick:function(){if(item.file)selectFile(item.file);}},item.name);})
+                                React.createElement('div',{style:{fontSize:9,color:'var(--acc)',marginTop:6}},'Click for details (',issue.items?issue.items.length:0,' items) →')
                             );})
                         )),
                         rightTab==='patterns'&&React.createElement(React.Fragment,null,
                             React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'🧩 Design Patterns & Anti-Patterns'),
                             data.patterns.length===0?React.createElement('div',{style:{textAlign:'center',padding:20,color:'var(--t3)'}},React.createElement('div',{style:{fontSize:32,marginBottom:8}},'🔍'),React.createElement('div',null,'No patterns detected'),React.createElement('div',{style:{fontSize:10,marginTop:8}},'Patterns are detected based on code structure')):
-                            data.patterns.map(function(p,i){return React.createElement('div',{key:i,className:'pattern-item'+(p.isAnti?' anti':'')},
+                            data.patterns.map(function(p,i){return React.createElement('div',{key:i,className:'pattern-item'+(p.isAnti?' anti':''),style:{cursor:'pointer'},onClick:function(){setDrillDown({type:'pattern',data:p});}},
                                 React.createElement('div',{className:'pattern-header'},
                                     React.createElement('span',{className:'pattern-icon'},p.icon),
                                     React.createElement('span',{className:'pattern-name'},p.name),
                                     p.isAnti&&React.createElement('span',{className:'badge badge-danger',style:{marginLeft:8}},'Anti-pattern')
                                 ),
                                 React.createElement('div',{className:'pattern-desc'},p.desc),
-                                React.createElement('div',{className:'pattern-files'},
-                                    p.files.slice(0,5).map(function(f,j){return React.createElement('span',{key:j,className:'pattern-file',style:{cursor:'pointer'},onClick:function(){selectFile(f.path);}},f.name);})
-                                ),
-                                p.files.length>5&&React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginTop:4}},'+',p.files.length-5,' more files'),
-                                p.metrics&&React.createElement('div',{className:'pattern-metrics'},
-                                    Object.entries(p.metrics).map(function(e){return React.createElement('div',{key:e[0],className:'pattern-metric'},React.createElement('div',{className:'pattern-metric-value'},e[1]),React.createElement('div',{className:'pattern-metric-label'},e[0]));})
-                                )
+                                React.createElement('div',{style:{fontSize:9,color:'var(--acc)',marginTop:6}},'Click for details (',p.files.length,' files) →')
                             );})
                         ),
                         rightTab==='security'&&React.createElement(React.Fragment,null,
@@ -2369,13 +2364,13 @@ function App(){
                                     React.createElement('div',{className:'badge badge-warning'},data.securityIssues.filter(function(i){return i.severity==='medium';}).length,' Medium'),
                                     React.createElement('div',{className:'badge badge-info'},data.securityIssues.filter(function(i){return i.severity==='low';}).length,' Low')
                                 ),
-                                data.securityIssues.map(function(issue,i){return React.createElement('div',{key:i,className:'security-item '+issue.severity,onClick:function(){selectFile(issue.path);}},
+                                data.securityIssues.map(function(issue,i){return React.createElement('div',{key:i,className:'security-item '+issue.severity,style:{cursor:'pointer'},onClick:function(){setDrillDown({type:'security',data:issue});}},
                                     React.createElement('div',{className:'security-header'},
                                         React.createElement('span',null,issue.severity==='high'?'🔴':issue.severity==='medium'?'🟡':'🔵'),
                                         React.createElement('span',{className:'security-title'},issue.title)
                                     ),
                                     React.createElement('div',{className:'security-desc'},issue.desc),
-                                    React.createElement('div',{className:'security-path'},issue.file,issue.line?' : Line '+issue.line:''),
+                                    React.createElement('div',{style:{fontSize:9,color:'var(--acc)',marginTop:6}},'Click for details →'),
                                     issue.code&&React.createElement('div',{className:'security-code'},issue.code)
                                 );})
                             )
@@ -2400,10 +2395,9 @@ function App(){
                                 );}),
                                 data.duplicates&&data.duplicates.length>0&&React.createElement('div',{style:{marginTop:16}},
                                     React.createElement('div',{style:{fontSize:11,fontWeight:600,marginBottom:8}},'📋 Duplicate Functions (',data.duplicates.length,')'),
-                                    data.duplicates.slice(0,10).map(function(d,i){return React.createElement('div',{key:i,style:{background:'var(--bg0)',borderRadius:6,padding:8,marginBottom:6,fontSize:10}},
+                                    data.duplicates.slice(0,10).map(function(d,i){return React.createElement('div',{key:i,style:{background:'var(--bg0)',borderRadius:6,padding:8,marginBottom:6,fontSize:10,cursor:'pointer'},onClick:function(){setDrillDown({type:'duplicate',data:d});}},
                                         React.createElement('div',{style:{fontWeight:600,color:d.type==='code'?'var(--purple)':'var(--orange)'}},d.type==='code'?'Similar Code':'Same Name',': ',d.name),
-                                        React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginTop:4}},d.files.slice(0,3).map(function(f){return f.file.split('/').pop();}).join(', '),d.files.length>3?' +'.concat(d.files.length-3,' more'):''),
-                                        React.createElement('div',{style:{fontSize:9,color:'var(--t2)',marginTop:4}},d.suggestion)
+                                        React.createElement('div',{style:{fontSize:9,color:'var(--acc)',marginTop:4}},'Click for details (',d.files.length,' locations) →')
                                     );})
                                 )
                             )
@@ -2546,6 +2540,96 @@ function App(){
                             )
                         );
                     })()
+                )
+            )
+        ),
+        drillDown&&React.createElement('div',{className:'modal-overlay',onClick:function(){setDrillDown(null);}},
+            React.createElement('div',{className:'modal',onClick:function(e){e.stopPropagation();},style:{maxWidth:600,maxHeight:'85vh',display:'flex',flexDirection:'column'}},
+                React.createElement('div',{className:'modal-header'},
+                    React.createElement('div',{className:'modal-title'},
+                        drillDown.type==='issue'?(drillDown.data.type==='critical'?'🔴 ':'🟡 ')+drillDown.data.title:
+                        drillDown.type==='pattern'?drillDown.data.icon+' '+drillDown.data.name:
+                        drillDown.type==='security'?(drillDown.data.severity==='high'?'🔴':drillDown.data.severity==='medium'?'🟡':'🔵')+' '+drillDown.data.title:
+                        drillDown.type==='duplicate'?(drillDown.data.type==='code'?'📋 Similar Code':'📛 Duplicate Name')+': '+drillDown.data.name:
+                        'Details'
+                    ),
+                    React.createElement('button',{className:'modal-close',onClick:function(){setDrillDown(null);}},'×')
+                ),
+                React.createElement('div',{className:'modal-body',style:{overflowY:'auto',flex:1}},
+                    // Issue drill-down
+                    drillDown.type==='issue'&&React.createElement(React.Fragment,null,
+                        React.createElement('div',{style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:16}},
+                            React.createElement('div',{style:{fontSize:11,color:'var(--t2)'}},drillDown.data.desc)
+                        ),
+                        React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'All Affected Items (',drillDown.data.items?drillDown.data.items.length:0,')'),
+                        drillDown.data.items&&drillDown.data.items.map(function(item,j){return React.createElement('div',{key:j,style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:8,cursor:item.file?'pointer':'default',borderLeft:'3px solid var(--acc)'},onClick:function(){if(item.file){selectFile(item.file);setDrillDown(null);}}},
+                            React.createElement('div',{style:{fontWeight:600,fontSize:11}},item.name),
+                            item.file&&React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace'}},item.file),
+                            item.suggestion&&React.createElement('div',{style:{fontSize:10,color:'var(--acc)',marginTop:6,padding:'6px 8px',background:'var(--bg2)',borderRadius:4}},'💡 ',item.suggestion)
+                        );})
+                    ),
+                    // Pattern drill-down
+                    drillDown.type==='pattern'&&React.createElement(React.Fragment,null,
+                        React.createElement('div',{style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:16}},
+                            React.createElement('div',{style:{fontSize:11,color:'var(--t2)'}},drillDown.data.desc),
+                            drillDown.data.isAnti&&React.createElement('div',{style:{marginTop:8}},React.createElement('span',{className:'badge badge-danger'},'Anti-pattern'))
+                        ),
+                        drillDown.data.metrics&&React.createElement('div',{style:{display:'flex',gap:12,marginBottom:16}},
+                            Object.entries(drillDown.data.metrics).map(function(e){return React.createElement('div',{key:e[0],style:{background:'var(--bg0)',padding:12,borderRadius:8,textAlign:'center',flex:1}},
+                                React.createElement('div',{style:{fontSize:20,fontWeight:600,color:'var(--acc)'}},e[1]),
+                                React.createElement('div',{style:{fontSize:9,color:'var(--t3)',textTransform:'capitalize'}},e[0])
+                            );})
+                        ),
+                        React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'All Files (',drillDown.data.files.length,')'),
+                        drillDown.data.files.map(function(f,j){return React.createElement('div',{key:j,style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:8,cursor:'pointer',borderLeft:'3px solid var(--acc)'},onClick:function(){selectFile(f.path);setDrillDown(null);}},
+                            React.createElement('div',{style:{fontWeight:600,fontSize:11}},f.name),
+                            React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace'}},f.path),
+                            f.fns&&React.createElement('div',{style:{fontSize:10,color:'var(--orange)',marginTop:4}},f.fns,' functions'),
+                            f.lines&&React.createElement('div',{style:{fontSize:10,color:'var(--purple)',marginTop:4}},f.lines,' lines')
+                        );})
+                    ),
+                    // Security drill-down
+                    drillDown.type==='security'&&React.createElement(React.Fragment,null,
+                        React.createElement('div',{style:{background:drillDown.data.severity==='high'?'rgba(255,100,100,0.1)':drillDown.data.severity==='medium'?'rgba(255,180,100,0.1)':'rgba(100,180,255,0.1)',padding:12,borderRadius:8,marginBottom:16,borderLeft:'3px solid '+(drillDown.data.severity==='high'?'var(--red)':drillDown.data.severity==='medium'?'var(--orange)':'var(--blue)')}},
+                            React.createElement('div',{style:{fontSize:11,fontWeight:600,marginBottom:4}},drillDown.data.severity.toUpperCase()+' Severity'),
+                            React.createElement('div',{style:{fontSize:11,color:'var(--t2)'}},drillDown.data.desc)
+                        ),
+                        React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'Location'),
+                        React.createElement('div',{style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:16,cursor:'pointer'},onClick:function(){selectFile(drillDown.data.path);setDrillDown(null);}},
+                            React.createElement('div',{style:{fontWeight:600,fontSize:11}},drillDown.data.file),
+                            React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace'}},drillDown.data.path),
+                            drillDown.data.line&&React.createElement('div',{style:{fontSize:10,color:'var(--orange)',marginTop:4}},'Line ',drillDown.data.line)
+                        ),
+                        drillDown.data.code&&React.createElement(React.Fragment,null,
+                            React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'Code'),
+                            React.createElement('pre',{style:{background:'var(--bg0)',padding:12,borderRadius:8,fontSize:10,fontFamily:'monospace',overflow:'auto',whiteSpace:'pre-wrap',wordBreak:'break-all'}},drillDown.data.code)
+                        ),
+                        React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12,marginTop:16}},'How to Fix'),
+                        React.createElement('div',{style:{background:'var(--bg0)',padding:12,borderRadius:8,fontSize:10}},
+                            drillDown.data.title==='Hardcoded Secret'?'Move credentials to environment variables (process.env) or a secrets manager like AWS Secrets Manager, HashiCorp Vault, or .env files (not committed to git).':
+                            drillDown.data.title==='SQL Injection Risk'?'Use parameterized queries or prepared statements. Never concatenate user input directly into SQL strings.':
+                            drillDown.data.title==='XSS Vulnerability'?'Sanitize user input before rendering. Use textContent instead of innerHTML, or use a sanitization library like DOMPurify.':
+                            drillDown.data.title==='Dynamic Code Execution'?'Avoid eval() entirely. Use JSON.parse() for JSON, or Function constructor only with trusted input.':
+                            'Review the flagged code and apply security best practices.'
+                        )
+                    ),
+                    // Duplicate drill-down
+                    drillDown.type==='duplicate'&&React.createElement(React.Fragment,null,
+                        React.createElement('div',{style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:16}},
+                            React.createElement('div',{style:{fontSize:11,color:'var(--t2)'}},drillDown.data.suggestion)
+                        ),
+                        React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},'All Locations (',drillDown.data.files.length,')'),
+                        drillDown.data.files.map(function(f,j){return React.createElement('div',{key:j,style:{background:'var(--bg0)',padding:12,borderRadius:8,marginBottom:8,cursor:'pointer',borderLeft:'3px solid '+(drillDown.data.type==='code'?'var(--purple)':'var(--orange)')},onClick:function(){selectFile(f.file);setDrillDown(null);}},
+                            React.createElement('div',{style:{fontWeight:600,fontSize:11}},f.name||drillDown.data.name),
+                            React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:4,fontFamily:'monospace'}},f.file),
+                            f.line&&React.createElement('div',{style:{fontSize:10,color:'var(--orange)',marginTop:4}},'Line ',f.line)
+                        );}),
+                        React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12,marginTop:16}},'Suggested Action'),
+                        React.createElement('div',{style:{background:'var(--bg0)',padding:12,borderRadius:8,fontSize:10}},
+                            drillDown.data.type==='code'?'Extract the similar code into a shared utility function. This reduces maintenance burden and ensures consistent behavior.':
+                            'Consider renaming these functions to be more specific, or consolidate them into a single shared function if they serve the same purpose.'
+                        )
+                    )
                 )
             )
         ),
