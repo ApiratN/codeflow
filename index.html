@@ -448,10 +448,22 @@ function App(){
     useEffect(function(){
         var params=new URLSearchParams(window.location.search);
         var repo=params.get('repo');
-        if(repo){setRepoUrl(repo);setTimeout(function(){var btn=document.getElementById('analyze-btn');if(btn)btn.click();},500);}
+        if(repo&&repo.length<200&&!repo.includes('{')&&/^[a-zA-Z0-9_.\/-]+$/.test(repo)){
+            setRepoUrl(repo);
+            setTimeout(function(){var btn=document.getElementById('analyze-btn');if(btn)btn.click();},500);
+        }
     },[]);
 
-    function parseUrl(url){var m=url.match(/(?:github\.com\/)?([^\/]+)\/([^\/\s#?]+)/);return m?{owner:m[1],repo:m[2].replace('.git','')}:null;}
+    function parseUrl(url){
+        if(!url||typeof url!=='string')return null;
+        url=url.trim();
+        if(url.length>200||url.includes('{')|| url.includes('"'))return null;
+        var m=url.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)/);
+        if(m)return{owner:m[1],repo:m[2].replace(/\.git$/,'')};
+        var simple=url.match(/^([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)$/);
+        if(simple)return{owner:simple[1],repo:simple[2]};
+        return null;
+    }
 
     function analyze(){
         var p=parseUrl(repoUrl);
