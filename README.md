@@ -31,6 +31,23 @@ Ever opened a new codebase and felt completely lost? **CodeFlow** turns any GitH
 
 ---
 
+## 📝 Recent Updates
+
+### Export JSON Report Completo
+- **Migliorata l'esportazione JSON** con report completo che include:
+  - Tutti i metadati del repository e health score dettagliato
+  - File completi con informazioni su churn (frequenza commit), layer, e funzioni
+  - Statistiche complete delle funzioni con callers, usage metrics, e metadata (isExported, isClassMethod, type)
+  - Tutti i problemi di sicurezza, pattern, e issue architetturali
+  - Rilevamento codice duplicato e violazioni di layer
+  - Suggerimenti e raccomandazioni automatiche
+  - Breakdown per linguaggio e struttura cartelle
+  - Statistiche complete delle funzioni con tutti i callers
+
+Il report JSON è ora completamente utilizzabile per analisi programmatiche, integrazione CI/CD, o strumenti di reporting personalizzati.
+
+---
+
 ## Features
 
 ### 🗺️ **Interactive Dependency Graph**
@@ -119,6 +136,27 @@ Or full URL: https://github.com/facebook/react
 
 ### Shareable Links
 After analysis, click 🔗 to copy a shareable link. Anyone can re-run the same analysis.
+
+### 📤 **Export Reports**
+Export your analysis in multiple formats for further processing:
+
+- **JSON Report** - Complete analysis data including:
+  - Repository metadata and health score
+  - All files with functions, dependencies, and churn data
+  - Complete function statistics with callers and usage metrics
+  - Security issues, patterns, and architecture issues
+  - Duplicate code detection and layer violations
+  - Suggestions and recommendations
+  - Language breakdown and folder structure
+  
+  Perfect for programmatic analysis, CI/CD integration, or custom reporting tools.
+
+- **Markdown Report** - Human-readable formatted report
+- **Plain Text Report** - Simple text format
+- **SVG Image** - Export the dependency graph visualization
+- **Raw JSON** - Simplified data export
+
+Click the 📤 Export button in the top bar after analysis to access all export options.
 
 ---
 

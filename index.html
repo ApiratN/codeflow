@@ -2644,6 +2644,7 @@ function App(){
         var report={
             repository:repo,
             analyzedAt:new Date().toISOString(),
+            codeflowVersion:'1.0',
             summary:{
                 healthScore:h.score,
                 healthGrade:h.grade,
@@ -2653,26 +2654,73 @@ function App(){
                 linesOfCode:data.stats.loc,
                 unusedFunctions:data.stats.dead,
                 securityIssues:data.securityIssues.length,
-                patterns:data.patterns.length
+                patterns:data.patterns.length,
+                duplicates:data.stats.duplicates||0,
+                layerViolations:data.stats.violations||0,
+                highSecurityIssues:data.stats.security||0
             },
             files:data.files.map(function(f){
                 var fns=f.functions.map(function(fn){
                     var st=data.fnStats[fn.name];
-                    return{name:fn.name,line:fn.line,internalCalls:st?st.internal:0,externalCalls:st?st.external:0,isUnused:st?(st.internal+st.external===0):true,code:fn.code};
+                    return{
+                        name:fn.name,
+                        line:fn.line,
+                        internalCalls:st?st.internal:0,
+                        externalCalls:st?st.external:0,
+                        totalCalls:st?(st.internal+st.external):0,
+                        isUnused:st?(st.internal+st.external===0):true,
+                        isExported:st?st.isExported:false,
+                        isClassMethod:st?st.isClassMethod:false,
+                        isTopLevel:st?st.isTopLevel:true,
+                        type:st?st.type:'function',
+                        callers:st&&st.callers?st.callers.map(function(c){return{file:c.file,name:c.name,count:c.count};}):[],
+                        code:fn.code
+                    };
                 });
-                return{path:f.path,folder:f.folder,layer:f.layer,lines:f.lines,functions:fns,functionCount:f.functions.length};
+                return{
+                    path:f.path,
+                    name:f.name,
+                    folder:f.folder,
+                    layer:f.layer,
+                    lines:f.lines,
+                    churn:f.churn||0,
+                    isCode:f.isCode!==false,
+                    functions:fns,
+                    functionCount:f.functions.length
+                };
             }),
-            unusedFunctions:data.deadFunctions.map(function(fn){return{name:fn.name,file:fn.file,folder:fn.folder,line:fn.line,codeLines:fn.codeLines,code:fn.code};}),
+            unusedFunctions:data.deadFunctions.map(function(fn){return{name:fn.name,file:fn.file,folder:fn.folder,line:fn.line,codeLines:fn.codeLines,code:fn.code,extension:fn.ext};}),
             dependencies:data.connections.map(function(c){
                 var src=typeof c.source==='object'?c.source.id:c.source;
                 var tgt=typeof c.target==='object'?c.target.id:c.target;
                 return{from:src,to:tgt,function:c.fn,callCount:c.count};
             }),
-            architectureIssues:data.issues.map(function(i){return{type:i.type,title:i.title,description:i.desc,affectedFiles:i.items?i.items.map(function(x){return x.file||x.name;}):[]};}),
-            patterns:data.patterns.map(function(p){return{name:p.name,description:p.desc,isAntiPattern:p.isAnti||false,severity:p.severity||'info',files:p.files.map(function(f){return f.path||f.name;}),metrics:p.metrics};}),
+            architectureIssues:data.issues.map(function(i){return{type:i.type,title:i.title,description:i.desc,affectedFiles:i.items?i.items.map(function(x){return x.file||x.name;}):[],affectedItems:i.items||[]};}),
+            patterns:data.patterns.map(function(p){return{name:p.name,description:p.desc,isAntiPattern:p.isAnti||false,severity:p.severity||'info',icon:p.icon||'',files:p.files.map(function(f){return f.path||f.name;}),fileDetails:p.files||[],metrics:p.metrics||{}};}),
             securityIssues:data.securityIssues.map(function(s){return{severity:s.severity,title:s.title,description:s.desc,file:s.file,path:s.path,line:s.line,code:s.code};}),
+            duplicates:data.duplicates||[],
+            layerViolations:data.layerViolations||[],
+            suggestions:data.suggestions||[],
             languageBreakdown:data.stats.languages||[],
-            folderStructure:data.folders
+            folderStructure:data.folders,
+            functionStatistics:Object.keys(data.fnStats||{}).map(function(fnName){
+                var st=data.fnStats[fnName];
+                return{
+                    name:fnName,
+                    file:st.file,
+                    folder:st.folder,
+                    line:st.line,
+                    internalCalls:st.internal,
+                    externalCalls:st.external,
+                    totalCalls:st.count||(st.internal+st.external),
+                    isExported:st.isExported,
+                    isClassMethod:st.isClassMethod,
+                    isTopLevel:st.isTopLevel,
+                    type:st.type,
+                    callers:st.callers?st.callers.map(function(c){return{file:c.file,name:c.name,count:c.count};}):[],
+                    code:st.code
+                };
+            })
         };
         if(format==='json'){
             var blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
