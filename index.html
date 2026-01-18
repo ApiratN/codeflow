@@ -1715,6 +1715,7 @@ function App(){
     var _ad=useState(360),rightPanelWidth=_ad[0],setRightPanelWidth=_ad[1];
     var _ae=useState(true),legendCollapsed=_ae[0],setLegendCollapsed=_ae[1];
     var _af=useState(null),filePreview=_af[0],setFilePreview=_af[1];// {path, content, line, filename, loading, error}
+    var _ag=useState(null),localDirHandle=_ag[0],setLocalDirHandle=_ag[1];
     var svgRef=useRef(null);
     var filePreviewRef=useRef(null);
     var treemapRef=useRef(null);
@@ -1936,6 +1937,205 @@ function App(){
         }).catch(function(e){if(e!=='cancelled'){setError(e.message||e);setLoading(false);}});
     }
 
+    function openLocalFolder(){
+        if(!window.showDirectoryPicker){
+            setError('Your browser does not support folder selection. Please use Chrome, Edge, or a Chromium-based browser.');
+            return;
+        }
+        window.showDirectoryPicker().then(function(dirHandle){
+            setLocalDirHandle(dirHandle);
+            setError(null);setData(null);setSelected(null);setBlastRadius(null);setLoading(true);setProgress('Reading local folder...');
+            readLocalFolder(dirHandle);
+        }).catch(function(e){
+            if(e.name!=='AbortError'){
+                setError('Failed to open folder: '+(e.message||e));
+            }
+        });
+    }
+
+    async function readLocalFolder(dirHandle, path=''){
+        var files=[];
+        var SOFT_LIMIT=300,HARD_LIMIT=750;
+        var fileCount=0;
+
+        async function readDirectory(handle, currentPath){
+            for await (const entry of handle.values()){
+                if(fileCount>=HARD_LIMIT)break;
+                var entryPath=currentPath?currentPath+'/'+entry.name:entry.name;
+                if(entry.kind==='directory'){
+                    if(!IGNORE.has(entry.name)){
+                        await readDirectory(entry,entryPath);
+                    }
+                }else if(entry.kind==='file'){
+                    var name=entry.name;
+                    if(!Parser.isIncluded(name))continue;
+                    var folder=currentPath||'root';
+                    files.push({path:entryPath,name:name,folder:folder,size:0,isCode:Parser.isCode(name)});
+                    fileCount++;
+                    if(fileCount%50===0)setProgress('Scanning files... '+fileCount+' found');
+                }
+            }
+        }
+
+        await readDirectory(dirHandle,'');
+        
+        if(files.length>SOFT_LIMIT&&files.length<=HARD_LIMIT){
+            var proceed=window.confirm('This folder has '+files.length+' files.\n\nAnalyzing large folders may be slow.\n\nProceed with all '+files.length+' files?');
+            if(!proceed){setLoading(false);return;}
+        }else if(files.length>HARD_LIMIT){
+            showNotification('Found '+files.length+' files. Limiting to '+HARD_LIMIT+' for performance.','warning');
+        }
+        var max=Math.min(files.length,HARD_LIMIT);
+        var analyzed=[];
+        var allFns=[];
+
+        async function processFile(i){
+            if(i>=max){finishAnalysis();return;}
+            var f=files[i];
+            setProgress('Analyzing '+(i+1)+'/'+max+': '+f.name);
+            var isCodeFile=f.isCode!==false&&Parser.isCode(f.name);
+            
+            // Get file handle from path
+            var parts=f.path.split('/');
+            var currentHandle=dirHandle;
+            for(var j=0;j<parts.length-1;j++){
+                if(currentHandle.values){
+                    var found=false;
+                    for await (const entry of currentHandle.values()){
+                        if(entry.name===parts[j]&&entry.kind==='directory'){
+                            currentHandle=entry;
+                            found=true;
+                            break;
+                        }
+                    }
+                    if(!found)break;
+                }
+            }
+            
+            try{
+                if(isCodeFile){
+                    var fileHandle=await currentHandle.getFileHandle(parts[parts.length-1]);
+                    var fileObj=await fileHandle.getFile();
+                    var content=await fileObj.text();
+                    var fns=Parser.extract(content,f.path);
+                    var layer=Parser.detectLayer(f.path);
+                    analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content,functions:fns,lines:content.split('\n').length,layer:layer,churn:0,isCode:true});
+                    fns.forEach(function(fn){allFns.push(Object.assign({},fn,{folder:f.folder,layer:layer}));});
+                    processFile(i+1);
+                }else{
+                    var fileHandle=await currentHandle.getFileHandle(parts[parts.length-1]);
+                    var fileObj=await fileHandle.getFile();
+                    var content=await fileObj.text();
+                    var layer=Parser.detectLayer(f.path);
+                    var lines=content?content.split('\n').length:0;
+                    analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content||'',functions:[],lines:lines,layer:layer,churn:0,isCode:false});
+                    processFile(i+1);
+                }
+            }catch(e){
+                analyzed.push({path:f.path,name:f.name,folder:f.folder,content:'',functions:[],lines:0,layer:Parser.detectLayer(f.path),churn:0,isCode:false});
+                processFile(i+1);
+            }
+        }
+
+        function finishAnalysis(){
+            setProgress('Building dependency graph...');
+            var fnNames=[...new Set(allFns.map(function(f){return f.name;}))];
+            var conns=[];
+            var fnStats={};
+            allFns.forEach(function(fn){
+                if(!fnStats[fn.name]){
+                    fnStats[fn.name]={
+                        internal:0,
+                        external:0,
+                        callers:new Map(),
+                        file:fn.file,
+                        folder:fn.folder,
+                        line:fn.line,
+                        code:fn.code,
+                        isTopLevel:fn.isTopLevel!==false,
+                        isExported:fn.isExported||false,
+                        isClassMethod:fn.isClassMethod||false,
+                        type:fn.type||'function'
+                    };
+                }
+            });
+            analyzed.forEach(function(file){
+                var calls=Parser.findCalls(file.content,fnNames,file.path,allFns);
+                Object.entries(calls).forEach(function(entry){
+                    var fn=entry[0],cnt=entry[1];
+                    if(cnt<=0)return;
+                    var def=fnStats[fn]?fnStats[fn].file:null;
+                    if(def){
+                        if(def===file.path){
+                            fnStats[fn].internal+=cnt;
+                        }else{
+                            conns.push({source:def,target:file.path,fn:fn,count:cnt});
+                            var ex=fnStats[fn].callers.get(file.path);
+                            if(ex)ex.count+=cnt;else fnStats[fn].callers.set(file.path,{file:file.path,name:file.name,count:cnt});
+                            fnStats[fn].external+=cnt;
+                        }
+                    }
+                });
+            });
+            Object.values(fnStats).forEach(function(s){s.callers=Array.from(s.callers.values());s.count=s.internal+s.external;});
+            var issues=[];
+            var deadFns=Object.entries(fnStats).filter(function(x){
+                var stats=x[1];
+                if(stats.internal>0||stats.external>0)return false;
+                if(stats.isClassMethod)return false;
+                if(!stats.isTopLevel)return false;
+                return true;
+            });
+            if(deadFns.length)issues.push({type:'warning',title:deadFns.length+' Unused Functions',desc:'Functions not called from other files',items:deadFns.map(function(x){return{name:x[0],file:x[1].file,line:x[1].line,code:x[1].code};})});
+            var godFiles=analyzed.filter(function(f){return f.functions.length>15;});
+            if(godFiles.length)issues.push({type:'critical',title:godFiles.length+' Large Files',desc:'Files with 15+ functions',items:godFiles.map(function(f){return{name:f.name+' ('+f.functions.length+' fns)',file:f.path,fns:f.functions.length,lines:f.lines};})});
+            var coupling={};
+            conns.forEach(function(c){coupling[c.target]=(coupling[c.target]||0)+1;});
+            var highCoup=Object.entries(coupling).filter(function(x){return x[1]>8;}).sort(function(a,b){return b[1]-a[1];});
+            if(highCoup.length)issues.push({type:'warning',title:highCoup.length+' Highly Coupled',desc:'Files imported by 8+ others',items:highCoup.map(function(x){return{name:x[0].split('/').pop()+' ('+x[1]+' imports)',file:x[0],imports:x[1]};})});
+            var connSet=new Set(conns.map(function(c){return c.source+'|'+c.target;}));
+            var circular=[];
+            conns.forEach(function(c){if(connSet.has(c.target+'|'+c.source)){var key=[c.source,c.target].sort().join('|');if(!circular.includes(key))circular.push(key);}});
+            if(circular.length)issues.push({type:'critical',title:circular.length+' Circular Dependencies',desc:'Files that import each other',items:circular.map(function(p){var parts=p.split('|');return{name:parts.map(function(x){return x.split('/').pop();}).join(' ↔ '),files:parts};})});
+            var patterns=Parser.detectPatterns(analyzed);
+            var securityIssues=Parser.detectSecurity(analyzed);
+            var duplicates=Parser.detectDuplicates(analyzed,allFns);
+            var layerViolations=Parser.detectLayerViolations(analyzed,conns);
+            analyzed.forEach(function(f){f.complexity=Parser.calcComplexity(f.content);});
+            var folders=[...new Set(analyzed.map(function(f){return f.folder;}))].sort();
+            var tree=buildTree(analyzed);
+            var totalLoc=analyzed.reduce(function(s,f){return s+f.lines;},0);
+            var langStats={};
+            analyzed.forEach(function(f){var ext=f.name.split('.').pop().toLowerCase();langStats[ext]=(langStats[ext]||0)+f.lines;});
+            var langArray=Object.entries(langStats).sort(function(a,b){return b[1]-a[1];}).map(function(e){return{ext:e[0],lines:e[1],pct:Math.round(e[1]/totalLoc*100)};});
+            if(duplicates.length>0){
+                var nameDups=duplicates.filter(function(d){return d.type==='name';});
+                var codeDups=duplicates.filter(function(d){return d.type==='code';});
+                if(nameDups.length)issues.push({type:'warning',title:nameDups.length+' Duplicate Function Names',desc:'Same function name in multiple files',items:nameDups.map(function(d){return{name:d.name+' ('+d.count+' files)',suggestion:d.suggestion,files:d.files,count:d.count};})});
+                if(codeDups.length)issues.push({type:'warning',title:codeDups.length+' Similar Code Blocks',desc:'Copy-paste code detected',items:codeDups.map(function(d){return{name:d.name,suggestion:d.suggestion,files:d.files};})});
+            }
+            if(layerViolations.length>0){
+                issues.push({type:'critical',title:layerViolations.length+' Architecture Violations',desc:'Lower layers importing from higher layers',items:layerViolations.map(function(v){return{name:v.fromLayer+' → '+v.toLayer,file:v.from,toFile:v.to,fn:v.fn,suggestion:v.suggestion};})});
+            }
+            var highComplexity=analyzed.filter(function(f){return f.complexity&&f.complexity.level==='critical';}).sort(function(a,b){return b.complexity.score-a.complexity.score;});
+            if(highComplexity.length)issues.push({type:'warning',title:highComplexity.length+' High Complexity Files',desc:'Files with complexity score >30',items:highComplexity.map(function(f){return{name:f.name+' ('+f.complexity.score+')',file:f.path,score:f.complexity.score,lines:f.lines};})});
+            var dataObj={files:analyzed,functions:allFns,connections:conns,fnStats:fnStats,folders:folders,tree:tree,issues:issues,patterns:patterns,securityIssues:securityIssues,duplicates:duplicates,layerViolations:layerViolations,deadFunctions:deadFns.map(function(x){var codeLines=x[1].code?x[1].code.split('\n').length:0;return{name:x[0],file:x[1].file,folder:x[1].folder,line:x[1].line,code:x[1].code,codeLines:codeLines,ext:x[1].file.split('.').pop()};}),stats:{files:analyzed.length,functions:allFns.length,connections:conns.length,dead:deadFns.length,patterns:patterns.length,security:securityIssues.filter(function(i){return i.severity==='high';}).length,duplicates:duplicates.length,violations:layerViolations.length,loc:totalLoc,languages:langArray}};
+            dataObj.suggestions=Parser.generateSuggestions(dataObj);
+            setData(dataObj);
+            setExpandedPaths(new Set(['']));
+            setRepoInfo({owner:'local',repo:'folder',name:'Local Folder'});
+            setLoading(false);
+        }
+
+        if(files.length===0){
+            setError('No code files found in the selected folder');
+            setLoading(false);
+            return;
+        }
+
+        processFile(0);
+    }
+
     var selectFile=useCallback(function(path){
         if(!data)return;
         var file=data.files.find(function(f){return f.path===path;});
@@ -1946,13 +2146,16 @@ function App(){
             setBlastRadius(blast);
             setOwnership(null);
             setExpandedFns(new Set());
-            if(repoInfo){
+            if(repoInfo&&!localDirHandle){
                 setOwnerLoading(true);
                 GitHub.getBlame(repoInfo.owner,repoInfo.repo,path).then(function(owners){setOwnership(owners);setOwnerLoading(false);}).catch(function(){setOwnerLoading(false);});
+            }else if(localDirHandle){
+                setOwnerLoading(false);
+                setOwnership([]);
             }
             updateGraphHighlight(path,blast);
         }
-    },[data,repoInfo]);
+    },[data,repoInfo,localDirHandle]);
     selectFileRef.current=selectFile;
 
     function updateGraphHighlight(path,blast){
@@ -2031,16 +2234,42 @@ function App(){
                 return;
             }
         }
-        // Fetch from GitHub
-        GitHub.getFile(repoInfo.owner,repoInfo.repo,path).then(function(content){
-            if(content){
-                setFilePreview({path:path,filename:filename,content:content,line:line||null,loading:false,error:null});
-            }else{
-                setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:false,error:'Could not load file content'});
+        // Fetch from GitHub or local directory
+        if(localDirHandle){
+            // Read from local directory
+            var parts=path.split('/');
+            var currentHandle=localDirHandle;
+            var promise=Promise.resolve(currentHandle);
+            for(var i=0;i<parts.length-1;i++){
+                promise=promise.then(function(handle){
+                    return handle.getDirectoryHandle();
+                }).then(function(dirHandle){
+                    return dirHandle.getDirectoryHandle(parts[i]);
+                });
             }
-        }).catch(function(e){
-            setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:false,error:e.message||'Failed to load file'});
-        });
+            promise.then(function(dirHandle){
+                return dirHandle.getFileHandle(parts[parts.length-1]);
+            }).then(function(fileHandle){
+                return fileHandle.getFile();
+            }).then(function(fileObj){
+                return fileObj.text();
+            }).then(function(content){
+                setFilePreview({path:path,filename:filename,content:content,line:line||null,loading:false,error:null});
+            }).catch(function(e){
+                setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:false,error:e.message||'Failed to load file'});
+            });
+        }else{
+            // Fetch from GitHub
+            GitHub.getFile(repoInfo.owner,repoInfo.repo,path).then(function(content){
+                if(content){
+                    setFilePreview({path:path,filename:filename,content:content,line:line||null,loading:false,error:null});
+                }else{
+                    setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:false,error:'Could not load file content'});
+                }
+            }).catch(function(e){
+                setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:false,error:e.message||'Failed to load file'});
+            });
+        }
     }
 
     // Scroll to highlighted line after file preview loads
@@ -2639,7 +2868,7 @@ function App(){
     function exportJSON(){if(!data)return;var blob=new Blob([JSON.stringify({stats:data.stats,files:data.files.map(function(f){return{path:f.path,fns:f.functions.length,layer:f.layer,lines:f.lines};}),connections:data.connections,issues:data.issues,patterns:data.patterns,security:data.securityIssues},null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow-analysis.json';a.click();}
     function generateReport(format){
         if(!data)return;
-        var repo=repoInfo?repoInfo.owner+'/'+repoInfo.repo:'Unknown Repository';
+        var repo=repoInfo?(localDirHandle?'Local Folder':repoInfo.owner+'/'+repoInfo.repo):'Unknown Repository';
         var h=calcHealth(data);
         var report={
             repository:repo,
@@ -2815,9 +3044,15 @@ function App(){
         showNotification('Report exported as '+format.toUpperCase(),'success');
     }
     function showNotification(msg,type){setToast({msg:msg,type:type||'success'});setTimeout(function(){setToast(null);},3000);}
-    function copyLink(){navigator.clipboard.writeText(window.location.href).then(function(){showNotification('Link copied to clipboard!');}).catch(function(){showNotification('Failed to copy link','error');});}
+    function copyLink(){
+        if(localDirHandle){
+            showNotification('Share links are not available for local folders','warning');
+            return;
+        }
+        navigator.clipboard.writeText(window.location.href).then(function(){showNotification('Link copied to clipboard!');}).catch(function(){showNotification('Failed to copy link','error');});
+    }
     function analyzePR(){if(!prUrl||!repoInfo)return;var m=prUrl.match(/\/pull\/(\d+)/);if(!m){showNotification('Invalid PR URL','error');return;}GitHub.getPR(repoInfo.owner,repoInfo.repo,m[1]).then(function(pr){if(pr)setPrData(pr);else showNotification('Could not load PR','error');});}
-    function resetAnalysis(){setData(null);setSelected(null);setBlastRadius(null);setOwnership(null);setRepoInfo(null);setRepoUrl('');setPrData(null);setFolderFilter(null);window.history.replaceState({},'',window.location.pathname);}
+    function resetAnalysis(){setData(null);setSelected(null);setBlastRadius(null);setOwnership(null);setRepoInfo(null);setRepoUrl('');setPrData(null);setFolderFilter(null);setLocalDirHandle(null);window.history.replaceState({},'',window.location.pathname);}
     function filterByFolder(path){setFolderFilter(function(prev){return prev===path?null:path;});}
     var health=useMemo(function(){return calcHealth(data);},[data]);
 
@@ -2830,14 +3065,15 @@ function App(){
             React.createElement('div',{className:'repo-input-group'},
                 React.createElement('input',{className:'repo-input','aria-label':'Repository URL',placeholder:'owner/repo or GitHub URL',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
                 React.createElement('input',{className:'repo-input',type:'password','aria-label':'GitHub Token',placeholder:'Token (optional)',value:token,onChange:function(e){setToken(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();},style:{maxWidth:120}}),
-                React.createElement('button',{id:'analyze-btn',className:'top-btn primary','aria-label':'Analyze repository',onClick:analyze,disabled:loading||!repoUrl},loading?'⏳':'🔍',' Analyze'),
+                React.createElement('button',{className:'top-btn primary','aria-label':'Analyze repository',onClick:analyze,disabled:loading||!repoUrl},loading?'⏳':'🔍',' Analyze'),
+                React.createElement('button',{className:'top-btn','aria-label':'Open local folder',onClick:function(){openLocalFolder();},disabled:loading},'📁 Open Folder'),
                 data&&React.createElement('button',{className:'refresh-btn','aria-label':'Refresh analysis',onClick:analyze,disabled:loading,title:'Refresh Analysis'},'↻ Refresh'),
                 data&&React.createElement('button',{className:'reset-btn','aria-label':'Reset analysis',onClick:resetAnalysis,title:'Clear & Reset'},'✕ Reset')
             ),
             React.createElement('div',{className:'topbar-actions'},
-                React.createElement('button',{className:'top-btn','aria-label':'Analyze Pull Request',onClick:function(){setShowPR(true);},disabled:!data},'📊 PR'),
+                React.createElement('button',{className:'top-btn','aria-label':'Analyze Pull Request',onClick:function(){setShowPR(true);},disabled:!data||localDirHandle},'📊 PR'),
                 React.createElement('button',{className:'top-btn','aria-label':'Export analysis',onClick:function(){setShowExport(true);},disabled:!data},'📤'),
-                React.createElement('button',{className:'top-btn','aria-label':'Copy share link',onClick:copyLink,disabled:!data},'🔗'),
+                React.createElement('button',{className:'top-btn','aria-label':'Copy share link',onClick:copyLink,disabled:!data||localDirHandle},'🔗'),
                 React.createElement('button',{className:'top-btn','aria-label':'Toggle theme',onClick:function(){setTheme(function(t){return t==='dark'?'light':'dark';});}},theme==='dark'?'☀️':'🌙')
             )
         ),
@@ -2896,11 +3132,11 @@ function App(){
                         folderFilter&&React.createElement('button',{className:'top-btn',style:{width:'100%',marginTop:8},onClick:function(){setFolderFilter(null);}},'✕ Clear Filter: ',folderFilter)
                     ),
                     React.createElement('div',{className:'sidebar-scroll'},React.createElement(TreeNode,{node:data.tree,selected:selected,onSelect:selectFile,expanded:expandedPaths,toggle:togglePath,filterFolder:filterByFolder,activeFilter:folderFilter}))
-                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'🔍'),React.createElement('div',{className:'empty-title'},'No Repository'),React.createElement('div',{className:'empty-desc'},'Enter a GitHub URL to analyze'))
+                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'🔍'),React.createElement('div',{className:'empty-title'},'No Repository'),React.createElement('div',{className:'empty-desc'},'Enter a GitHub URL or click "Open Folder" to analyze a local directory'))
             ),
             React.createElement('div',{className:'canvas-area'},
                 loading?React.createElement('div',{className:'loading'},React.createElement('div',{className:'spinner'}),React.createElement('div',{className:'loading-text'},'Analyzing...'),React.createElement('div',{className:'loading-progress'},progress)):
-                !data?React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'⚡'),React.createElement('div',{className:'empty-title'},'CodeFlow'),React.createElement('div',{className:'empty-desc'},'Visualize architecture, blast radius, ownership, patterns & security')):
+                !data?React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'⚡'),React.createElement('div',{className:'empty-title'},'CodeFlow'),React.createElement('div',{className:'empty-desc'},'Visualize architecture, blast radius, ownership, patterns & security\n\nEnter a GitHub URL or click "Open Folder" to analyze a local directory')):
                 React.createElement(React.Fragment,null,
                     React.createElement('div',{className:'viz-selector'},
                         React.createElement('button',{className:'viz-selector-btn'+(graphConfig.vizType==='graph'?' active':''),onClick:function(){setGraphConfig(Object.assign({},graphConfig,{vizType:'graph'}));}},'🕸️ Graph'),
@@ -3226,7 +3462,7 @@ function App(){
                             )
                         )
                     )
-                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'📊'),React.createElement('div',{className:'empty-title'},'Analysis'),React.createElement('div',{className:'empty-desc'},'Analyze a repo to see insights'))
+                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'📊'),React.createElement('div',{className:'empty-title'},'Analysis'),React.createElement('div',{className:'empty-desc'},'Analyze a GitHub repo or local folder to see insights'))
             )
         ),
         showExport&&React.createElement('div',{className:'modal-overlay',onClick:function(){setShowExport(false);}},
